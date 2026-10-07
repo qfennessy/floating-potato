@@ -1,6 +1,6 @@
 # Mars Balloon Navigator — Hack Plan
 
-Sundai Hack 144 · Sun Oct 11, 2026
+Built at [Sundai Club](https://www.sundai.club) · [Hack 144 — Autonomous Spacecraft Hack](https://www.sundai.club/events/boston/hack-144-autonomous-spacecraft-hack) · Sun Oct 11, 2026 · MIT
 
 ## Pitch
 
@@ -79,7 +79,7 @@ Ideal team is 3–4 people. If you're short, the frontend person also takes the 
 | Agent | LLM commander, mission log | The commander picks targets and writes a readable log |
 | Frontend | Map, replay, deployment | A public URL replays both runs |
 
-Sunday schedule (hack time runs 12:00–20:00):
+Sunday schedule (hack time runs 12:00–20:00; the [event page](https://www.sundai.club/events/boston/hack-144-autonomous-spacecraft-hack) has the full day, starting 10:00):
 
 1. **12:00–14:00:** pitch, form the team, get the drifter flying and one track drawn on the map.
 2. **14:00 check-in:** show the end-to-end loop, even if ugly.
@@ -108,7 +108,7 @@ If the 16:00 run/bike tempts you, take it only if the planner already works.
 | Planner doesn't beat the drifter | Tune target placement so altitude choice clearly matters |
 | LLM commander is slow or flaky live | Replay logged decisions from precomputed runs |
 
-**Questions for Alejandro Carrasco Aragón**
+**Questions for Alejandro Carrasco Aragón** (guest speaker, MIT AeroAstro; talk at 11:00)
 
 - In your KSP agent work, did LLMs do better at long-horizon planning or at reactive control? (This justifies our commander-plus-planner split.)
 - What would a real Mars balloon mission need from onboard autonomy that our demo ignores?

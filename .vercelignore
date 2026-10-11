@@ -2,3 +2,4 @@
 .vercel
 .venv
 runs
+web/data/parts

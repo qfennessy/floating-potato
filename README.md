@@ -12,7 +12,7 @@ Why it matters: Venus's surface is 460 °C and 90 atmospheres, so landers die in
 
 Win condition for the demo: the agent reaches more targets in the same number of Earth days than a balloon that rides one altitude around the planet.
 
-## Current state (Oct 11, 14:20)
+## Current state (Oct 11, 14:50)
 
 Live demo: https://venus-balloon-navigator.vercel.app
 
@@ -20,32 +20,31 @@ Team: one human (Q) and Claude Code.
 
 | Piece | State | Where |
 |---|---|---|
-| Simulator | Working. Our own plain numpy sim, not Google's Balloon Learning Environment (it is built for Earth; see Prep) | `sim/venus.py` |
-| Winds | Made-up layered winds that match the plan. Real Venus Climate Database winds not pulled yet | `sim/venus.py` |
-| Strategist | Gemini Robotics-ER 2 looks at a map picture once a day and picks a lane: north (22°N), equator (5°N) or south (47°S). It picks north in every demo world and stays there | `sim/strategist.py` |
-| Lane holding | Between chases, the balloon holds the chosen latitude by going up (drifts poleward) or down (drifts toward the equator) | `sim/mission.py` |
-| Science sensor events | Eruptions, gas plumes and lightning appear; the balloon only hears nearby ones. It chases only events it can reach within 6 hours | `sim/events.py`, `sim/commander.py` |
-| Planner | Flies the chases: tries a few hundred altitude plans ahead and keeps the best | `sim/planner.py` |
-| Fly it yourself | On the website you fly a pink balloon live: a slider or the arrow keys set its altitude, and a JavaScript copy of the simulator moves it (matches the Python sim within 1 km over a whole mission). You race the AI agent's replay in the same world, and dragging the timeline back rewinds your flight | `web/app.js` |
-| Demo website | Live on Vercel. Replays saved runs, so it can't crash on stage. Rebuild data with `uv run --with numpy --with pillow --with matplotlib python sim/export_web.py --gemini`, then push to `main`: Vercel deploys `web/` on every push | `web/` |
-| Pitch sketch | Done (from an earlier version of the agent) | `docs/pitch_sketch.png` |
+| Targets | 60 real named science sites and 70 real named volcanoes from the USGS/IAU gazetteer (largest first, plus the original picks) | `sim/build_targets.py`, `sim/data/venus_features.json` |
+| Worlds | Each world has its own launch point (30°S to 30°N) and weather: the height where north-south drift flips (52 to 60 km), wind speed, push strength, tide timing. The agents only know the forecast | `sim/venus.py` |
+| Two AI balloons | Gemini Robotics-ER 2 and Gemini 3.8 Flash fly the same worlds with the same map image, prompt and tools. Every 2 days each picks a latitude lane or "roam"; between check-ins a planner flies | `sim/strategist.py`, `sim/commander.py` |
+| Lanes | Worked out from where volcanoes and sites cluster (6 lanes, e.g. 11°N with 10 volcanoes) | `sim/strategist.py` |
+| Roam | The planner chases the nearest unvisited sites at full speed | `sim/planner.py` |
+| Science sensor events | Eruptions, gas plumes and lightning; the balloon only hears nearby ones | `sim/events.py` |
+| Fly it yourself | On the website you fly a pink balloon live with a slider or arrow keys, against both AIs. No time limit: the AI flights end at day 30, yours keeps going and new events keep appearing | `web/app.js` |
+| Website | 3D globe with star field and flat map; replays saved runs, so it can't crash on stage. Rebuild: `sim/export_web.py fly --model er|flash --seeds N` per world (in parallel), then `sim/export_web.py assemble`, then push to `main` | `web/` |
 
-**What we learned:** because the wind only blows west, a balloon can't stay near a place. It can only choose a latitude and pass everything in that lane once a lap. So the winning move is picking the right lane and staying in it.
+**What we learned:**
+- Winds only blow west, so a balloon can't stay near a place; it can only pick a latitude and pass everything in it once a lap.
+- With a few volcanoes, holding the busiest lane won. With 60 one-time sites, lanes run dry after a lap or two, and flying high and fast while sweeping across latitudes wins. Both models chose "roam" about 70% of the time.
+- Varying launch points and weather removed the "58 km" luck: a fixed altitude only wins if you happen to pick the right one before launch.
 
-**Every world is different** (added 14:15): each world now has its own launch point (30°S to 30°N) and its own weather. The height where north-south drift flips moves between 52 and 60 km, and wind speed, push strength and the daily tide vary. Before this, every world launched from 15°N, 300°E with the same winds, and a balloon parked at 58 km drifted into the busy 22°N lane by luck and matched the agent. The agent only knows the forecast; its lane holder records the push it actually feels at each height. (That learning doesn't change the score yet: the top and bottom of the corridor always push the expected way, so trusting the forecast does as well.)
-
-**Scoreboard, 20 worlds, 10 Earth days each.** A fixed balloon gets one altitude for every world, picked before launch, so the fair rival is the best single altitude across all worlds:
+**Scoreboard, 20 worlds, 30 Earth days each.** A fixed balloon gets one altitude for every world, picked before launch, so the fair rival is the best single altitude across all worlds:
 
 | Balloon | Points |
 |---|---|
-| Agent, Gemini Robotics-ER 2 strategist (on the website) | 81 |
-| Agent, rule strategist (`uv run --with numpy --with matplotlib python sim/compare.py`) | 69 |
-| Best single fixed altitude for all worlds (56.5 km) | 41 |
-| Fixed at 54 km, like Vega 1985 | 32 |
-| Average of the 8 fixed altitudes | 32 |
-| 58 km, the old lucky altitude | 24 |
+| Gemini 3.8 Flash | 303 |
+| Gemini Robotics-ER 2 | 300 |
+| Best single fixed altitude for all worlds (59.5 km) | 282 |
+| Average of the 8 fixed altitudes | 235 |
+| Fixed at 54 km, like Vega 1985 | 218 |
 
-Scores per world are small and noisy (0 to 13 points), so single worlds can go either way; worlds 1 to 5 happen to be bad for the agent. Known weakness: the equator volcanoes spread from 0.5°N to 8.5°N, wider than the 700 km a balloon can sweep, so holding the middle of that lane catches only Ozza Mons.
+Both AIs beat the best fixed altitude by about 7%, and the two models are within 1% of each other: each wins about half the worlds. Model calls: ER 2 answers in about 3 s, Flash in about 30 s. No decision fell back to the rule version. Not yet measured: how a rule-based strategist does over the same 30 days (at 10 days it scored 127 against 155 for the best fixed altitude).
 
 ## The simple version
 

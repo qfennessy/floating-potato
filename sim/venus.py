@@ -2,7 +2,9 @@
 
 Longitude is degrees east, 0-360. Winds blow westward, so longitude decreases.
 """
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
@@ -13,15 +15,11 @@ ALT_RATE_KM = 0.5                   # altitude change per step when ascending/de
 CORRIDOR_KM = (50.0, 62.0)          # below: too hot for the envelope; above: acid cloud top
 SOLAR_DAY_H = 116.75 * 24           # Venus solar day in Earth hours (sub-solar point moves slowly)
 
-TARGETS = {
-    # name: (lat, lon east). Capture radius is CAPTURE_KM.
-    "Maat Mons": (0.5, 194.6),
-    "Ovda Regio": (-2.8, 85.7),
-    "Alpha Regio": (-22.0, 4.8),
-    "Maxwell Montes": (65.2, 3.3),
-    "Beta Regio": (25.3, 282.8),
-    "Idunn Mons": (-46.6, 214.5),
-}
+# 60 real named science sites from the USGS/IAU gazetteer (sim/build_targets.py):
+# name -> (lat, lon east). Capture radius is CAPTURE_KM; each is worth 1 point, once.
+FEATURES = json.loads((Path(__file__).with_name("data") / "venus_features.json").read_text())
+TARGETS = {k: (v["lat"], v["lon"]) for k, v in FEATURES["sites"].items()}
+TARGET_SIZE = {k: v["diameter_km"] for k, v in FEATURES["sites"].items()}
 CAPTURE_KM = 350.0
 
 # Weather. FORECAST is what everyone knows before launch. Each world's TRUE weather differs

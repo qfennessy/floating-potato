@@ -21,11 +21,12 @@ ALTS = np.arange(50.5, 62.0, 1.5)
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--worlds", type=int, default=20)
+    ap.add_argument("--days", type=float, default=10.0)
     a = ap.parse_args()
     seeds = range(1, a.worlds + 1)
-    agent = np.array([fly("cmp", seed=s, strategist=sg.rule_strategist,
+    agent = np.array([fly("cmp", a.days, seed=s, strategist=sg.rule_strategist,
                           commander=cmd.rule_commander)["points"] for s in seeds])
-    fixed = np.array([[fly("cmp", seed=s, fixed_alt=float(alt))["points"] for alt in ALTS] for s in seeds])
+    fixed = np.array([[fly("cmp", a.days, seed=s, fixed_alt=float(alt))["points"] for alt in ALTS] for s in seeds])
     print(f"agent: {agent.sum():.0f} points over {a.worlds} worlds")
     for alt, col in zip(ALTS, fixed.T):
         print(f"  fixed {alt:4.1f} km: {col.sum():4.0f}   agent ahead in {(agent > col).sum()}, "

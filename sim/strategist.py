@@ -26,35 +26,75 @@ from events import VOLCANOES
 from venus import TARGETS
 
 ROOT = Path(__file__).resolve().parent.parent
-MODEL = "gemini-robotics-er-2-preview"
-URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
+from commander import MODEL, model_url
 _BASEMAP = None
 
-# Lanes the balloon can cruise in: volcanoes grouped by latitude.
-LANES = {
-    "north (22N: Theia, Gula, Sif Mons)": 22.2,
-    "equator (5N: Maat, Sapas, Ozza Mons)": 4.5,
-    "south (47S: Idunn Mons)": -46.6,
-}
-LANE_VOLCANOES = {
-    "north (22N: Theia, Gula, Sif Mons)": ["Theia Mons", "Gula Mons", "Sif Mons"],
-    "equator (5N: Maat, Sapas, Ozza Mons)": ["Maat Mons", "Sapas Mons", "Ozza Mons"],
-    "south (47S: Idunn Mons)": ["Idunn Mons"],
-}
+REACH_DEG = 3.3     # a balloon in a lane passes within capture range (350 km) of things this close
 DEG_PER_DAY = 4.0   # rough best-case north-south speed; near the equator it is much slower
+
+
+def build_lanes(k=6, min_gap=7.0):
+    """Latitude lanes where volcanoes and sites cluster. A lane's worth: volcanoes in reach
+    (repeat eruptions) plus half a point per site in reach (each scores once). Greedy, k lanes."""
+    def near(lat, pts):
+        return [n for n, (l, _) in pts.items() if abs(l - lat) <= REACH_DEG]
+    cands = sorted({round(l, 1) for l, _ in list(VOLCANOES.values()) + list(TARGETS.values()) if abs(l) <= 60})
+    score = {c: len(near(c, VOLCANOES)) + 0.5 * len(near(c, TARGETS)) for c in cands}
+    lanes, vols = {}, {}
+    for c in sorted(cands, key=lambda c: -score[c]):
+        if len(lanes) == k:
+            break
+        if all(abs(c - l) >= min_gap for l in lanes.values()):
+            nv, ns = len(near(c, VOLCANOES)), len(near(c, TARGETS))
+            name = f"{abs(c):.0f}{'N' if c >= 0 else 'S'} ({nv} volcanoes, {ns} sites)"
+            lanes[name] = c
+            vols[name] = near(c, VOLCANOES)
+    return lanes, vols
+
+
+LANES, LANE_VOLCANOES = build_lanes()
+ROAM = "roam (no lane: fly fast and hunt the nearest unvisited sites)"
+
+
+def roam_choice(view, reason):
+    return {"lane": ROAM, "hold_lat": None, "focus": list(VOLCANOES), "fixed": view["unvisited"], "reason": reason}
+
+
+def lane_choice(lane, view, reason):
+    return {"lane": lane, "hold_lat": LANES[lane], "focus": LANE_VOLCANOES[lane],
+            "fixed": [t for t in view["unvisited"] if abs(TARGETS[t][0] - LANES[lane]) <= 6], "reason": reason}
 
 
 def travel_days(lat_from, lat_to):
     return abs(lat_to - lat_from) / DEG_PER_DAY
 
 
+SITE_W, VOLCANO_W = 1.0, 0.3   # a site is a sure point (once); a volcano might erupt while we pass
+SWITCH_MARGIN = 1.3             # only move lanes if the new one looks this much better
+
+
+def lane_worth(lane, st, view, current=None):
+    """What a lane still offers: unvisited sites in reach plus a little per volcano, scaled by the
+    share of the mission left after getting there (the current lane needs no travel)."""
+    left = max(view["days"] - st.hours / 24, 0.1)
+    if lane == ROAM:
+        return 0.0
+    travel = 0.0 if lane == current else travel_days(st.lat, LANES[lane])
+    ns = sum(abs(TARGETS[t][0] - LANES[lane]) <= REACH_DEG for t in view["unvisited"])
+    return (SITE_W * ns + VOLCANO_W * len(LANE_VOLCANOES[lane])) * max(0.0, left - travel) / left
+
+
 def rule_strategist(st, view):
-    """Pick the lane with the most volcanoes; on a tie, the closer one. Never switch after that:
-    switching costs days, and recent activity doesn't predict where the next event will be."""
-    lane = view.get("lane") or max(LANES, key=lambda l: (len(LANE_VOLCANOES[l]), -abs(LANES[l] - st.lat)))
-    return {"lane": lane, "hold_lat": LANES[lane], "focus": LANE_VOLCANOES[lane],
-            "fixed": [t for t in view["unvisited"] if abs(TARGETS[t][0] - LANES[lane]) <= 6],
-            "reason": f"Cruising in the {lane} lane."}
+    """Hold a lane while it still has at least 3 unvisited sites; otherwise roam. With many
+    one-time sites, a lane runs dry after a lap or two, and roaming sweeps up new ones."""
+    cur = view.get("lane")
+    best = max(LANES, key=lambda l: lane_worth(l, st, view, cur))
+    in_reach = sum(abs(TARGETS[t][0] - LANES[best]) <= REACH_DEG for t in view["unvisited"])
+    if in_reach < 3:
+        return roam_choice(view, "No lane has enough unvisited sites left, so roaming to sweep up new ones.")
+    if cur in LANES and lane_worth(best, st, view, cur) <= SWITCH_MARGIN * lane_worth(cur, st, view, cur):
+        best = cur
+    return lane_choice(best, view, f"Cruising in the {best} lane: the most still to see for the travel time.")
 
 
 def render_map(st, view, px=1024):
@@ -77,15 +117,13 @@ def render_map(st, view, px=1024):
     for e in view["known"]:
         if e.site in counts:
             counts[e.site] += 1
+    for lane, lat in LANES.items():                     # lanes as labelled bands
+        ax.axhspan(lat - REACH_DEG, lat + REACH_DEG, color="cyan", alpha=0.12)
+        ax.annotate(lane, (2, lat), xytext=(0, 3), textcoords="offset points", color="cyan", fontsize=9)
     for v, (lat, lon) in VOLCANOES.items():
-        ax.plot(lon, lat, "^", color="red", mec="black", ms=10)
-        ax.annotate(f"{v} ({counts[v]} events)", (lon, lat), xytext=(6, -12),
-                    textcoords="offset points", color="yellow", fontsize=9, weight="bold")
+        ax.plot(lon, lat, "^", color="red" if counts[v] == 0 else "yellow", mec="black", ms=7)
     for t, (lat, lon) in TARGETS.items():
-        done = t in view["reached"]
-        ax.plot(lon, lat, "*", color="lime" if done else "white", mec="black", ms=14)
-        ax.annotate(t + (" (done)" if done else ""), (lon, lat), xytext=(8, 4),
-                    textcoords="offset points", color="white", fontsize=9)
+        ax.plot(lon, lat, "*", color="lime" if t in view["reached"] else "white", mec="black", ms=8)
     ax.set_xlim(0, 360)
     ax.set_ylim(-90, 90)
     ax.axis("off")
@@ -100,10 +138,12 @@ def _prompt(st, view):
     lines = "\n".join(f"- hour {l['t_h']:.0f}: {l['text']}" for l in heard) or "- nothing yet"
     current = view.get("lane")
     counts = {lane: sum(e.site in vs for e in view["known"]) for lane, vs in LANE_VOLCANOES.items()}
+    todo = {lane: sum(abs(TARGETS[t][0] - lat) <= REACH_DEG for t in view["unvisited"]) for lane, lat in LANES.items()}
     lanes = "\n".join(
-        f"- {lane}: about {travel_days(st.lat, lat):.1f} days to get there; "
-        f"{counts[lane]} events heard there so far" + ("  <- CURRENT LANE" if lane == current else "")
+        f"- {lane}: about {travel_days(st.lat, lat):.1f} days to get there; {todo[lane]} unvisited sites "
+        f"left in it; {counts[lane]} events heard there so far" + ("  <- CURRENT LANE" if lane == current else "")
         for lane, lat in LANES.items())
+    lanes += f"\n- {ROAM}: {len(view['unvisited'])} unvisited sites anywhere" + ("  <- CURRENT" if current == ROAM else "")
     left_days = view["days"] - st.hours / 24
     return (
         "You are the strategist for a research balloon in the clouds of Venus. The image is a map "
@@ -114,25 +154,29 @@ def _prompt(st, view):
         f"Hour {st.hours:.0f} of {view['days'] * 24:.0f}. Balloon at lat {st.lat:.1f}, lon {st.lon:.1f} E.\n"
         "Points: fixed site 1 (once each), eruption 2, gas plume 3, lightning 1. Eruptions and plumes "
         "happen at the red volcanoes; the label shows how many each has produced so far. Events last "
-        "1-3 days and the balloon must pass within 350 km while one is active.\n"
+        "1-3 days and the balloon must pass within 350 km while one is active. On the map: red "
+        "triangles are volcanoes (yellow once they have erupted), white stars are unvisited sites, "
+        "green stars visited ones, cyan bands are the lanes.\n"
         f"Recent sensor reports:\n{lines}\n"
         "Because the wind always blows west, a balloon that holds one latitude passes every site in "
-        "that lane once a lap, about every 4-5 days. So the key choice is which lane to cruise in.\n"
-        f"Lanes ({left_days:.1f} days of mission left):\n{lanes}\n"
-        "Every day spent travelling between lanes is a day not passing volcanoes, and events happen "
-        "at random, so a burst of recent activity does not mean more is coming there. Switch lanes "
-        "only if it clearly pays off in the time left. Call choose_lane once, with a one-sentence "
-        "reason a mission log reader understands."
+        "that lane once a lap, about every 4-5 days. Holding a lane means cruising at the altitude "
+        "with no north-south drift, which is slower than flying high. Sites score only once, so a "
+        "lane runs dry after a lap or two; volcanoes can erupt again. Roaming instead lets the "
+        "planner chase the nearest unvisited sites, usually flying high and fast and sweeping "
+        "across latitudes.\n"
+        f"Choices ({left_days:.1f} days of mission left):\n{lanes}\n"
+        "Events happen at random, so a burst of recent activity does not mean more is coming there. "
+        "Call choose_lane once, with a one-sentence reason a mission log reader understands."
     )
 
 
-def gemini_strategist(thinking="medium", timeout=60):
+def gemini_strategist(model=MODEL, thinking="medium", timeout=120):
     key = os.environ.get("GEMINI_API_KEY")
     tool = {"functionDeclarations": [{
         "name": "choose_lane",
         "description": "Choose the latitude lane the balloon cruises in until the next check-in.",
         "parameters": {"type": "object", "properties": {
-            "lane": {"type": "string", "enum": list(LANES)},
+            "lane": {"type": "string", "enum": list(LANES) + [ROAM]},
             "reason": {"type": "string"}},
             "required": ["lane", "reason"]}}]}
 
@@ -150,16 +194,18 @@ def gemini_strategist(thinking="medium", timeout=60):
             "toolConfig": {"functionCallingConfig": {"mode": "ANY"}},
             "generationConfig": {"thinkingConfig": {"thinkingLevel": thinking}},
         }
-        req = urllib.request.Request(URL, json.dumps(body).encode(), method="POST", headers={
+        req = urllib.request.Request(model_url(model), json.dumps(body).encode(), method="POST", headers={
             "Content-Type": "application/json", "x-goog-api-key": key})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 parts = json.load(resp)["candidates"][0]["content"]["parts"]
             args = next(p["functionCall"] for p in parts if "functionCall" in p).get("args", {})
-            lane = args.get("lane") if args.get("lane") in LANES else view.get("lane") or list(LANES)[0]
-            return {"lane": lane, "hold_lat": LANES[lane], "focus": LANE_VOLCANOES[lane],
-                    "fixed": [t for t in view["unvisited"] if abs(TARGETS[t][0] - LANES[lane]) <= 6],
-                    "reason": args.get("reason", "").strip()}
+            lane, reason = args.get("lane"), args.get("reason", "").strip()
+            if lane == ROAM:
+                return roam_choice(view, reason)
+            if lane not in LANES:
+                lane = view.get("lane") if view.get("lane") in LANES else list(LANES)[0]
+            return lane_choice(lane, view, reason)
         except Exception as e:
             out = rule_strategist(st, view)
             out["reason"] += f" (rule fallback: {type(e).__name__})"

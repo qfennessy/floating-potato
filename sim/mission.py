@@ -107,8 +107,8 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
         out = strategist(st, view)
         plan["focus"] = [v for v in out.get("focus", []) if v in VOLCANOES] or plan["focus"]
         plan["fixed"] = [t for t in out.get("fixed", []) if t in TARGETS]
-        if out.get("hold_lat") is not None:
-            plan["hold"] = float(out["hold_lat"])
+        if "hold_lat" in out:                                 # None means roam
+            plan["hold"] = None if out["hold_lat"] is None else float(out["hold_lat"])
         plan["lane"] = out.get("lane", plan["lane"])
         say("strategy", out.get("reason", ""), focus=plan["focus"], fixed=plan["fixed"], hold_lat=plan["hold"])
         planner.set_watch([VOLCANOES[v] for v in plan["focus"]], WATCH_W)

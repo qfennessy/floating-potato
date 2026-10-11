@@ -8,17 +8,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from venus import KM_PER_DEG, gc_km
+from venus import FEATURES, KM_PER_DEG, gc_km
 
-VOLCANOES = {
-    "Maat Mons": (0.5, 194.6),
-    "Sapas Mons": (8.5, 188.3),
-    "Ozza Mons": (4.5, 201.0),
-    "Theia Mons": (22.7, 281.0),
-    "Gula Mons": (21.9, 359.0),
-    "Sif Mons": (22.0, 352.0),
-    "Idunn Mons": (-46.6, 214.5),
-}
+# 70 real named mountains (USGS/IAU gazetteer, sim/build_targets.py) where eruptions and plumes happen.
+VOLCANOES = {k: (v["lat"], v["lon"]) for k, v in FEATURES["volcanoes"].items()}
 
 KINDS = {
     # sensor, points if reached, hours before it fades, how far away the sensor notices it,

@@ -28,3 +28,6 @@ dist/
 
 # Vercel
 .vercel/
+
+# Per-model export parts (assembled into web/data/world*.json)
+web/data/parts/

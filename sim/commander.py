@@ -9,7 +9,10 @@ import os
 import urllib.request
 
 MODEL = "gemini-robotics-er-2-preview"
-URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
+
+
+def model_url(model):
+    return f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 TOOLS = [{"functionDeclarations": [
     {"name": "chase_event",
@@ -48,7 +51,7 @@ def _prompt(ev, st, eta_h, hours_left, fixed_todo):
     )
 
 
-def gemini_commander(thinking="medium", timeout=30):
+def gemini_commander(model=MODEL, thinking="medium", timeout=90):
     """Gemini Robotics-ER as commander. Falls back to the rule commander if the call fails."""
     key = os.environ.get("GEMINI_API_KEY")
 
@@ -62,7 +65,7 @@ def gemini_commander(thinking="medium", timeout=30):
             "toolConfig": {"functionCallingConfig": {"mode": "ANY"}},
             "generationConfig": {"thinkingConfig": {"thinkingLevel": thinking}},
         }
-        req = urllib.request.Request(URL, json.dumps(body).encode(), method="POST", headers={
+        req = urllib.request.Request(model_url(model), json.dumps(body).encode(), method="POST", headers={
             "Content-Type": "application/json", "x-goog-api-key": key})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:

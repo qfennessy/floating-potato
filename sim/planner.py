@@ -72,7 +72,7 @@ def eta_hours(st, target, max_hours, n=96, seed=0):
     return None if not np.isfinite(hit) else (hit + 1) * STEP_S / 3600
 
 
-def search_planner(n=192, iters=3, elite=16, seed=0, targets=None, band=None):
+def search_planner(n=128, iters=3, elite=16, seed=0, targets=None, band=None):
     """Return a policy(state) -> action. `targets`/`band` are the commander's knobs."""
     rng = np.random.default_rng(seed)
     allowed = np.ones(len(LEVELS), bool)
@@ -81,7 +81,9 @@ def search_planner(n=192, iters=3, elite=16, seed=0, targets=None, band=None):
     mem = {"plan": None, "t": -1, "targets": as_targets(targets or TARGETS), "watch": None, "watch_w": 0.0}
 
     def replan(st):
-        todo = {k: v for k, v in mem["targets"].items() if k not in st.reached and v[3] > st.hours}
+        # Only what's within reach in latitude: the balloon moves at most a few degrees a day.
+        todo = {k: v for k, v in mem["targets"].items()
+                if k not in st.reached and v[3] > st.hours and abs(v[0] - st.lat) <= 25}
         probs = np.tile(allowed / allowed.sum(), (HORIZON, 1))
         keep = []
         if mem["plan"] is not None:                     # warm start: shift the last best plan

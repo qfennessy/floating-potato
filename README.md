@@ -26,7 +26,7 @@ Team: one human (Q) and Claude Code.
 | Science sensor events | Working. Eruptions, gas plumes and lightning appear; the commander chases or ignores each one | `sim/events.py`, `sim/mission.py` |
 | Commander | Gemini Robotics-ER 2 flew all five demo worlds: 41 decisions, 7 chases, no fallbacks. A rule version is the backup | `sim/commander.py` |
 | Replay files | Each run saves a JSON with the track, events and log | `runs/` (made by `sim/mission.py`) |
-| Demo website | Live on Vercel. Replays saved runs, so it can't crash on stage. Rebuild data with `uv run --with numpy --with pillow python sim/export_web.py --gemini`, then `vercel deploy --prod` from `web/` | `web/` |
+| Demo website | Live on Vercel. Replays saved runs, so it can't crash on stage. Rebuild data with `uv run --with numpy --with pillow python sim/export_web.py --gemini`, then push to `main`: Vercel deploys `web/` on every push | `web/` |
 | Pitch sketch | Done | `docs/pitch_sketch.png` |
 
 **Scoreboard, 5 random worlds, 10 Earth days each (points):** agent 24, Vega-style drifter at 54 km 5, best fixed altitudes 30 (50.5 km) and 28 (58 km). The agent clearly beats Vega but not the best fixed altitude yet. Why: early on it chases Beta Regio north and misses the volcano cluster near the equator, where most eruptions happen. A drifter at 50.5 km slides toward the equator by luck.

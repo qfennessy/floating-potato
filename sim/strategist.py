@@ -132,7 +132,7 @@ def render_map(st, view, px=1024):
             ax.plot(m["lon"], m["lat"], "o", mfc="none", mec="magenta", ms=22, mew=3)
             ax.annotate("PRIORITY", (m["lon"], m["lat"]), xytext=(12, 10), textcoords="offset points",
                         color="magenta", fontsize=10, weight="bold")
-        if m["type"] == "tip" and st.hours < m["erupt_h"] + 72:
+        if m["type"] == "tip" and "site" in m and st.hours < m["erupt_h"] + 72:
             lat, lon = VOLCANOES[m["site"]]
             ax.plot(lon, lat, "o", mfc="none", mec="orange", ms=22, mew=3)
             ax.annotate("ALERT", (lon, lat), xytext=(12, 10), textcoords="offset points",
@@ -180,7 +180,8 @@ def _prompt(st, view):
         "in it once a lap; it is slower than flying high. Sites score only once, so judge from the map "
         "how many unvisited sites each lane still has. Roaming lets the planner chase the nearest "
         "unvisited sites, flying high and fast across latitudes. You can also name one place to head "
-        "for first (head_for); the planner flies there, then goes back to your lane or roaming.\n"
+        "for (head_for): the planner flies there, then holds that place's latitude until the next "
+        "check-in, passing it again about every 4-5 days.\n"
         f"{goto}Choices ({left_days:.1f} days of mission left):\n{lanes}\n"
         "Call choose_lane once, with a one-sentence reason a mission log reader understands."
     )

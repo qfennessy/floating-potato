@@ -23,7 +23,7 @@ KINDS = {
     "lightning": dict(sensor="radio receiver", value=1.0, life_h=12, detect_km=3000, blur_km=100,
                       text="radio crackle, possible lightning"),
     # Only from mission control tips: a big eruption that was announced in advance.
-    "major": dict(sensor="microphone", value=5.0, life_h=72, detect_km=6000, blur_km=150,
+    "major": dict(sensor="microphone", value=5.0, life_h=120, detect_km=6000, blur_km=150,
                   text="major eruption"),
 }
 

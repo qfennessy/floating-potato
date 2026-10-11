@@ -14,7 +14,7 @@ import numpy as np
 
 import commander as cmd
 from events import VOLCANOES, detectable, generate
-from missionctl import bonus_targets, make_messages, points_for
+from missionctl import bonus_targets, make_messages, personalize, points_for
 from planner import eta_hours, search_planner
 import venus
 from venus import KM_PER_DEG, STEP_S, TARGETS, State, drifter, gc_km, step, wind, world_start, world_weather
@@ -132,12 +132,17 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
 
     for _ in range(int(days * 24 * 3600 / STEP_S)):
         for m in msgs:                                       # mission control: deliver on time
-            if m["t_h"] <= st.hours and m not in delivered:
+            if m["t_h"] <= st.hours and m["id"] not in {d["id"] for d in delivered}:
+                m, extra_ev = personalize(m, st.lat, st.reached, seed)   # reachable from where we are
+                if extra_ev:
+                    events.append(extra_ev)
+                    by_id[extra_ev.id] = extra_ev
                 delivered.append(m)
-                say("message", m["text"], msg=m["id"])
+                say("message", m["text"], msg=m["id"], **{k: m[k] for k in ("site", "lat", "lon") if k in m})
                 plan["next_h"] = st.hours                    # every agent gets a check-in right away
         if plan["goto"] and gc_km(st.lat, st.lon, *PLACES[plan["goto"]]) <= venus.CAPTURE_KM:
-            say("arrived", f"arrived at {plan['goto']}", goto=plan["goto"])
+            say("arrived", f"arrived at {plan['goto']}; holding its latitude until the next check-in", goto=plan["goto"])
+            plan["hold"] = PLACES[plan["goto"]][0]           # stay on its latitude: we pass it again each lap
             plan["goto"] = None
             if planner:
                 planner.set_targets(planner_targets())
@@ -177,7 +182,7 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
 
         # Captures are judged at the TRUE source; the planner only knows the reported spot.
         active = {**TARGETS, **{e.id: (e.lat, e.lon) for e in events if e.t_h <= st.hours < e.ends_h},
-                  **bonus_targets(msgs, st.hours)}
+                  **bonus_targets(delivered, st.hours)}
         before = set(st.reached)
         if planner and plan["hold"] is not None and not chasing and not plan["goto"]:
             action = holder.act(st, plan["hold"])            # cruise in the chosen band
@@ -190,7 +195,7 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
         for got in set(st.reached) - before:
             what = (f"the priority site {got[6:]} (bonus)" if got.startswith("BONUS:")
                     else got if got in TARGETS else by_id[got].label())
-            say("reached", f"reached {what}", target=got, pts=points_for(got, st.hours, st.lat, by_id, msgs))
+            say("reached", f"reached {what}", target=got, pts=points_for(got, st.hours, st.lat, by_id, delivered))
         track.append((st.lat, st.lon, st.alt, st.hours))
 
     points = sum(l["pts"] for l in log if l["kind"] == "reached")
@@ -199,7 +204,7 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
         "points": points, "reached": st.reached, "laps": round(st.laps, 2),
         "events": [{**{k: v for k, v in e.__dict__.items() if k != "cur_value"}, "sensor": e.spec["sensor"],
                     "value": e.spec["value"], "ends_h": e.ends_h, "text": e.label()} for e in events],
-        "messages": msgs,
+        "messages": delivered,
         "targets": {k: list(v) for k, v in TARGETS.items()},
         "log": log,
         "track": np.round(np.array(track), 3).tolist(),

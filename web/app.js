@@ -27,7 +27,8 @@ function fit(c) {
 }
 const xy = (lat, lon, W, H) => [((lon % 360) + 360) % 360 / 360 * W, (90 - lat) / 180 * H];
 const hoursToDay = (h) => (h / 24).toFixed(1);
-const totalH = () => state.world.days * 24;
+const totalH = () => state.world.days * 24;          // AI flights and scoring end here (day 30)
+const endH = () => (state.world.days + 1) * 24;        // the clock stops a day later (day 31)
 // Replayed flights end when their precomputed data does (day 30); yours never ends.
 const idx = (T) => Math.min(Math.floor(T / state.world.step_h), state.world.runs.agent.track.length - 1);
 const idxYou = (T) => Math.floor(T / state.world.step_h);
@@ -287,17 +288,35 @@ function star(ctx, x, y, r, fill) {
 // ---------- altitude strip ----------
 function drawStrip() {
   const [ctx, W, H] = fit(stripC);
-  const w = state.world, i0 = idx(state.T), pad = 28, span = Math.max(totalH(), state.T);
+  const w = state.world, i0 = idx(state.T), pad = 28, span = endH();
   const [lo, hi] = [48, 64];
+  const runs = runsIn(), ROW = 10, rowsTop = H - 16 - runs.length * ROW;   // scoring rows under the plot
   const X = (h) => pad + (h / span) * (W - pad - 8);
-  const Y = (a) => 8 + (hi - a) / (hi - lo) * (H - 24);
+  const Y = (a) => 8 + (hi - a) / (hi - lo) * (rowsTop - 14);
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = "rgba(74,222,128,0.12)";
   ctx.fillRect(X(0), Y(w.corridor_km[1]), X(span) - X(0), Y(w.corridor_km[0]) - Y(w.corridor_km[1]));
   ctx.fillStyle = "#a89c8c"; ctx.font = "10px JetBrains Mono, monospace";
   for (const a of [50, 56, 62]) ctx.fillText(a, 4, Y(a) + 3);
-  const every = span > 40 * 24 ? 10 : 5;
-  for (let d = 0; d <= span / 24; d += every) ctx.fillText(`d${d}`, X(d * 24) - 6, H - 3);
+  ctx.fillStyle = "#a89c8c";
+  for (let d = 0; d <= span / 24; d += 5) ctx.fillText(`d${d}`, X(d * 24) - 6, H - 3);
+  const SHORT = { you: "you", agent: "ER", flash: "Fl", rules: "RB", vega: "54", best: "fix" };
+  runs.forEach((r, j) => {                                  // one row per balloon: a tick each time it scored
+    const y0 = rowsTop + j * ROW;
+    ctx.fillStyle = "rgba(255,255,255,0.04)"; ctx.fillRect(X(0), y0, X(span) - X(0), ROW - 2);
+    ctx.fillStyle = COLOR[r]; ctx.font = "9px JetBrains Mono, monospace"; ctx.fillText(SHORT[r] || r, 2, y0 + 7);
+    for (const l of w.runs[r].log) {
+      if ((l.kind !== "reached" && l.kind !== "you") || l.t_h > state.T) continue;
+      const pts = l.pts ?? valueOf(l.target), x = X(l.t_h), fresh = state.T - l.t_h < 8;
+      ctx.globalAlpha = pts > 0 ? 1 : 0.35;
+      ctx.fillRect(x - (fresh ? 1.5 : 1), y0 + (ROW - 2) * (1 - Math.min(1, 0.35 + pts / 6)), fresh ? 3 : 2,
+                   (ROW - 2) * Math.min(1, 0.35 + pts / 6));
+      ctx.globalAlpha = 1;
+    }
+  });
+  ctx.save(); ctx.setLineDash([3, 3]); ctx.strokeStyle = "rgba(255,255,255,0.35)";   // scoring finish line
+  ctx.beginPath(); ctx.moveTo(X(totalH()), 4); ctx.lineTo(X(totalH()), H - 16); ctx.stroke(); ctx.restore();
+  ctx.fillText("finish", X(totalH()) + 3, 12);
   for (const r of runsIn()) {
     const tr = w.runs[r].track, i = runIdx(r, i0);
     ctx.strokeStyle = COLOR[r]; ctx.lineWidth = r === "agent" || r === "you" ? 2 : 1.3;
@@ -308,8 +327,28 @@ function drawStrip() {
     }
     ctx.stroke();
   }
+  // Points: a dot on each balloon's altitude line where it scored, bigger for more points;
+  // a fresh catch (last 8 simulated hours) pulses. Zero-point catches (relay outage) are hollow.
+  for (const r of runsIn()) {
+    const tr = w.runs[r].track;
+    for (const l of w.runs[r].log) {
+      if ((l.kind !== "reached" && l.kind !== "you") || l.t_h > state.T) continue;
+      const k = Math.min(Math.round(l.t_h / w.step_h), tr.length - 1), pts = l.pts ?? valueOf(l.target);
+      const x = X(l.t_h), y = Y(tr[k][2]), rad = 2.5 + Math.min(pts, 10) * 0.7;
+      ctx.beginPath(); ctx.arc(x, y, rad, 0, 7);
+      if (pts > 0) { ctx.fillStyle = COLOR[r]; ctx.fill(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.stroke(); }
+      else { ctx.strokeStyle = COLOR[r]; ctx.lineWidth = 1; ctx.stroke(); }
+      const age = state.T - l.t_h;
+      if (age < 8 && pts > 0) {
+        const f = age / 8;
+        ctx.beginPath(); ctx.arc(x, y, rad + 3 + 10 * f, 0, 7);
+        ctx.strokeStyle = COLOR[r]; ctx.globalAlpha = 1 - f; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1;
+        if (pts >= 2) { ctx.fillStyle = COLOR[r]; ctx.font = "600 10px Inter, sans-serif"; ctx.fillText(`+${pts}`, x + rad + 3, y - rad - 2); }
+      }
+    }
+  }
   ctx.strokeStyle = "rgba(255,255,255,0.4)"; ctx.beginPath();
-  ctx.moveTo(X(state.T), 4); ctx.lineTo(X(state.T), H - 14); ctx.stroke();
+  ctx.moveTo(X(state.T), 4); ctx.lineTo(X(state.T), H - 16); ctx.stroke();
 }
 
 // ---------- side panels ----------
@@ -489,14 +528,15 @@ function frame(now) {
   state.last = now;
   if (state.world) {
     if (state.playing) {
-      state.T += dt * state.speed;                   // no end: your flight keeps going
+      state.T = Math.min(state.T + dt * state.speed, endH());   // the clock stops at day 31
+      if (state.T >= endH()) setPlaying(false);
     }
     state.maxT = Math.max(state.maxT, state.T, totalH());
     syncYou(); drawPilot(); sounds(dt);
     const ym = state.world.runs.you.msgs;
     if (globe() && ym.length !== state.markerCount) { state.markerCount = ym.length; globe().setMarkers(ym); }
-    $("scrub").value = Math.round(state.T / state.maxT * 1000);
-    $("clock").textContent = `day ${hoursToDay(state.T)}` + (state.T > totalH() ? ` · AI flights ended day ${state.world.days}` : "");
+    $("scrub").value = Math.round(state.T / endH() * 1000);
+    $("clock").textContent = `day ${hoursToDay(state.T)} of ${state.world.days + 1}` + (state.T > totalH() ? ` · scoring ended day ${state.world.days}` : "");
     if (flatShown()) drawMap();
     if (globe()) {
       const T = state.T;
@@ -509,7 +549,7 @@ function frame(now) {
 
 function setPlaying(p) {
   state.playing = p;
-  $("play").textContent = p ? "Pause" : "Play";
+  $("play").textContent = p ? "Pause" : state.world && state.T >= endH() ? "Replay" : "Play";
 }
 
 async function load(seed) {
@@ -539,6 +579,7 @@ async function init() {
     if (e.key === " ") { $("play").click(); e.preventDefault(); }
   });
   $("play").onclick = () => {
+    if (state.T >= endH()) state.T = 0;
     setPlaying(!state.playing);
   };
   $("view").onclick = () => {
@@ -557,7 +598,7 @@ async function init() {
     $("sound").classList.toggle("on", audio.on);
   };
   $("speed").value = String(state.speed);
-  $("scrub").oninput = (e) => { state.T = e.target.value / 1000 * state.maxT; state.logCount = -1; };
+  $("scrub").oninput = (e) => { state.T = e.target.value / 1000 * endH(); state.logCount = -1; };
   const q = +new URLSearchParams(location.search).get("world");
   await load(state.index.worlds.some((w) => w.seed === q) ? q : 7);   // world 7: the clearest agent win; the table shows all 20
   requestAnimationFrame(frame);

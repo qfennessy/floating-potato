@@ -62,7 +62,7 @@ button.on { border-color: var(--agent); color: var(--agent); }
 .mapwrap { background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 canvas { display: block; width: 100%; }
 #map { aspect-ratio: 2 / 1; }
-#strip { height: 120px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+#strip { height: 200px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
 
 .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
 .controls input[type=range] { flex: 1; min-width: 140px; accent-color: var(--agent); }

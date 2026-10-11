@@ -12,7 +12,7 @@ Why it matters: Venus's surface is 460 °C and 90 atmospheres, so landers die in
 
 Win condition for the demo: the agent reaches more targets in the same number of Earth days than a balloon that rides one altitude around the planet.
 
-## Current state (Oct 11, 15:25)
+## Current state (Oct 11, 15:47)
 
 Live demo: https://venus-balloon-navigator.vercel.app
 
@@ -26,7 +26,7 @@ Team: one human (Q) and Claude Code.
 | Lanes | Worked out from where volcanoes and sites cluster (6 lanes, e.g. 11°N with 10 volcanoes) | `sim/strategist.py` |
 | Roam | The planner chases the nearest unvisited sites at full speed | `sim/planner.py` |
 | Science sensor events | Eruptions, gas plumes and lightning; the balloon only hears nearby ones | `sim/events.py` |
-| Fly it yourself | On the website you fly a pink balloon live with a slider or arrow keys, against both AIs and the rulebook (purple). Small volcano sounds (made in the browser) play as eruptions and plumes start; there's a Sound on/off button. No time limit: the AI flights end at day 30, yours keeps going and new events keep appearing | `web/app.js` |
+| Fly it yourself | On the website you fly a pink balloon live with a slider or arrow keys, against both AIs and the rulebook (purple). Small volcano sounds (made in the browser) play as eruptions and plumes start; there's a Sound on/off button. The clock stops at day 31; scores count to day 30. Hover any score card for how that balloon decides. The altitude strip marks every score with a dot and a tick in that balloon's row. No time limit: the AI flights end at day 30, yours keeps going and new events keep appearing | `web/app.js` |
 | Website | 3D globe with star field and flat map; replays saved runs, so it can't crash on stage. Rebuild: `sim/export_web.py fly --model er|flash --seeds N` per world (in parallel), then `sim/export_web.py assemble`, then push to `main` | `web/` |
 
 **What we learned:**
@@ -39,18 +39,22 @@ Team: one human (Q) and Claude Code.
 - **Volcanoes erupt in spells:** an eruption makes that volcano far likelier to erupt again over the next few days. The sensor log shows it; the rulebook ignores history.
 - **No crutches for the models:** the prompt no longer lists unvisited sites per lane; the models read them off the map image.
 
-**Scoreboard, 20 worlds, 30 Earth days each, harder worlds.** A fixed balloon gets one altitude for every world, picked before launch:
+**Fair requests (15:45):** each balloon's priority site and alert volcano are now picked within 6° of its own latitude when the message arrives; alert eruptions last 5 days (longer than a lap); "head for X" means fly there and hold X's latitude until the next check-in. Check: a strategist that simply obeys every request reached 14/20 bonuses and 12/20 alert eruptions and scored about 500.
 
-| Balloon | Points | Sites | Bonus sites | Alert eruptions | Captures lost to outages |
-|---|---|---|---|---|---|
-| Rulebook: hold a lane while it has 3+ unvisited sites, else roam | 349 | 247 | 1 | 2 | 36 |
-| Gemini Robotics-ER 2 | 319 | 154 | 1 | 1 | 4 |
-| Best single fixed altitude for all worlds (59.5 km) | 317 | 207 | 3 | 0 | 16 |
-| Gemini 3.8 Flash | 306 | 185 | 3 | 1 | 17 |
-| Average of the 8 fixed altitudes | 241 | | | | |
-| Fixed at 54 km, like Vega 1985 | 221 | 151 | 2 | 0 | 13 |
+**Scoreboard, 20 worlds, 30 Earth days each, harder worlds with fair requests.** A fixed balloon gets one altitude for every world, picked before launch:
 
-What it says: the models read the messages and react (ER 2 avoided the outage hemisphere almost completely), but they over-react. ER 2 named a place to head for at 63% of its check-ins, Flash at 37%, and those detours cost the steady site-sweeping that earns most points. Almost nobody reached the priority sites (1 to 3 of 20), which suggests many requests are too far north or south to reach in 7 days: the next fix is to make every request reachable. Before these changes (easier worlds): rulebook 363, Flash 303, ER 2 300.
+| Balloon | Points | Sites | Bonus sites | Alert eruptions |
+|---|---|---|---|---|
+| Rulebook: hold a lane while it has 3+ unvisited sites, else roam | 456 | 242 | 11 | 6 |
+| Gemini Robotics-ER 2 | 388 | 163 | 9 | 12 |
+| Gemini 3.8 Flash | 376 | 157 | 6 | 10 |
+| Best single fixed altitude for all worlds (59.5 km) | 371 | 207 | 8 | 3 |
+| Fixed at 54 km, like Vega 1985 | 340 | 151 | 13 | 9 |
+| Average of the 8 fixed altitudes | 315 | | | |
+
+What it says: requests within 6° are now so close that balloons that can't read them often collect the bonus anyway (Vega's drifter got the most). The models do win on alert eruptions (12 and 10 vs 6), but they still collect far fewer sites, because they detour to named places at 40 to 60% of check-ins. Next fix: requests that are reachable but not free (10 to 20° away), so reading them is what earns the bonus.
+
+Earlier rounds, for the record: harder worlds with unreachable requests: rulebook 349, ER 2 319, Flash 306. Easier worlds: rulebook 363, Flash 303, ER 2 300.
 
 ## The simple version
 

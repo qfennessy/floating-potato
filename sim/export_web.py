@@ -20,6 +20,7 @@ import strategist as sg
 import venus
 from mission import fly
 from events import VOLCANOES
+from end_state import end_state
 from missionctl import make_messages, make_samples
 from venus import CAPTURE_KM, CORRIDOR_KM, STEP_S, TARGET_SIZE, TARGETS
 
@@ -111,7 +112,8 @@ def assemble(days):
         rows.append({"seed": s, "agent": runs["agent"]["points"], "flash": runs.get("flash", {}).get("points"),
                      "rules": runs.get("rules", {}).get("points"), "hybrid": runs.get("hybrid", {}).get("points"),
                      "vega": runs["vega"]["points"], "best": runs["best"]["points"], "best_alt": single,
-                     "avg": round(avg, 1)})
+                     "avg": round(avg, 1),
+                     "end": {k: end_state(v, days) for k, v in runs.items()}})
     (WEB / "data" / "index.json").write_text(json.dumps({"days": days, "worlds": rows}))
     tot = lambda k: sum(r[k] or 0 for r in rows)
     print(f"{len(rows)} worlds, {days:g} days. ER 2 {tot('agent'):.0f}, Flash {tot('flash'):.0f}, rulebook {tot('rules'):.0f}, hybrid {tot('hybrid'):.0f}, "

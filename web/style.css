@@ -164,3 +164,19 @@ main { margin-top: 16px; }
 
 .summary tr.total td { border-bottom: 2px solid var(--muted); background: rgba(255,255,255,0.03); }
 .summary tr.total td.lead b { color: var(--good); }
+
+/* health/budget gauges in the table and on the score chips */
+.summary td .gauge { display: inline-flex; flex-direction: column; gap: 1px; width: 34px; margin-left: 8px; vertical-align: middle; cursor: help; }
+.summary td .gauge i { display: block; height: 3px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
+.summary td .gauge u { display: block; height: 100%; text-decoration: none; }
+.summary td .gauge i.h u { background: #4ade80; }
+.summary td .gauge i.b u { background: #ffb347; }
+.summary td .gauge i.g u { background: #7cc4ff; }
+.summary td .gauge.lost { display: inline; width: auto; color: #f87171; font-size: 11px; font-weight: 600; }
+.score .card { flex-wrap: wrap; }
+.score .card .hbar { flex-basis: 100%; height: 2px; background: rgba(255,255,255,0.12); border-radius: 2px; overflow: hidden; }
+.score .card .hbar u { display: block; height: 100%; background: #4ade80; text-decoration: none; }
+.score .card .hbar.dead u { background: #f87171; }
+.score .card.dead { opacity: 0.55; }
+.summary .gauge-key { font-size: 12px; color: var(--muted); }
+.summary .gauge-key i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin: 0 4px 0 10px; }

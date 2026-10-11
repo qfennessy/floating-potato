@@ -397,6 +397,15 @@ function drawStrip() {
   ctx.moveTo(X(state.T), 4); ctx.lineTo(X(state.T), H - 16); ctx.stroke();
 }
 
+// Envelope health of a balloon right now (budget is sampled hourly in the data; yours is live).
+function healthAt(r) {
+  const run = state.world.runs[r];
+  if (r === "you") { const p = run.track.at(-1); return [p[5] ?? 1, p[6] === 0]; }
+  const b = run.budget || [];
+  const h = b.length ? b[Math.min(b.length - 1, Math.floor(state.T))][2] : 1;
+  return [h, run.lost_h != null && state.T >= run.lost_h];
+}
+
 // ---------- side panels ----------
 function drawScore() {
   const cards = [["you", "You"], ["hybrid", "Rules + Gemini"], ["agent", "ER 2"], ["flash", "Flash"], ["rules", "Rulebook"],
@@ -407,7 +416,9 @@ function drawScore() {
     const pts = pointsBy(r, Math.min(state.T, totalH()));
     const extra = r === "you" && state.T > totalH() ? pointsBy("you", state.T) - pts : 0;
     const note = r === "you" && state.T > totalH() ? `<em>final at day ${state.world.days}${extra ? ` · +${extra} after, not counted` : ""}</em>` : "";
-    return `<div class="card ${r}${r === state.sel ? " sel" : ""}" data-run="${r}" title=""><b>${pts}</b><span>${name}</span>${note}</div>`;
+    const [hl, dead] = healthAt(r);
+    const hb = `<i class="hbar${dead ? " dead" : ""}"><u style="width:${dead ? 100 : Math.round(hl * 50) * 2}%"></u></i>`;
+    return `<div class="card ${r}${r === state.sel ? " sel" : ""}${dead ? " dead" : ""}" data-run="${r}" title=""><b>${dead ? "✕ " : ""}${pts}</b><span>${name}</span>${hb}${note}</div>`;
   }).join("");
   if (html === state.scoreHtml) return;                 // only touch the DOM when a score changes
   state.scoreHtml = html;
@@ -438,12 +449,22 @@ function drawTable() {
   const tot = (k) => rows.reduce((s, r) => s + (r[k] ?? 0), 0);
   const keys = ["hybrid", "agent", "flash", "rules", "vega"], top = Math.max(...keys.map(tot), tot("best"));
   const cell = (k) => `<td class="${tot(k) === top ? "lead" : ""}"><b>${tot(k)}</b></td>`;
+  // Under each score: health, ballast and gas left at the finish (or when it was lost).
+  const gauge = (r, run) => {
+    const e = r.end && r.end[run];
+    if (!e) return "";
+    const tip = `${e.lost_h != null ? `Lost on day ${(e.lost_h / 24).toFixed(1)}. ` : ""}Health ${Math.round(e.h * 100)}%, ballast ${e.b.toFixed(0)}/45 km, gas ${e.g.toFixed(0)}/45 km left at the finish; ${e.risky_h} h in risky layers; ${e.sprints} sprint check-ins.`;
+    if (e.lost_h != null) return `<span class="gauge lost" title="${tip}">✕ lost day ${Math.floor(e.lost_h / 24)}</span>`;
+    const bar = (cls, f) => `<i class="${cls}"><u style="width:${Math.round(Math.max(0, Math.min(1, f)) * 100)}%"></u></i>`;
+    return `<span class="gauge" title="${tip}">${bar("h", e.h)}${bar("b", e.b / 45)}${bar("g", e.g / 45)}</span>`;
+  };
+  const sc = (r, run, val, win) => `<td class="${win ? "win" : ""}">${val ?? "–"}${gauge(r, run)}</td>`;
   $("table").innerHTML =
     `<tr><th>World</th><th>Rulebook + Gemini</th><th>Gemini ER 2</th><th>Gemini 3.8 Flash</th><th>Rulebook</th><th>Drifter 54 km</th><th>Average fixed altitude</th><th>Best single fixed altitude</th></tr>` +
     `<tr class="total"><td><b>Total, all ${rows.length} worlds</b></td>${cell("hybrid")}${cell("agent")}${cell("flash")}${cell("rules")}${cell("vega")}<td><b>${Math.round(tot("avg") * 10) / 10}</b></td>${cell("best")}</tr>` +
     rows.map((r) => `<tr class="${r.seed === state.world.seed ? "current" : ""}" data-seed="${r.seed}" style="cursor:pointer">
-      <td>World ${r.seed}</td><td class="${(r.hybrid ?? 0) > (r.rules ?? 0) ? "win" : ""}">${r.hybrid ?? "–"}</td><td class="${r.agent > r.best ? "win" : ""}">${r.agent}</td><td class="${(r.flash ?? 0) > r.best ? "win" : ""}">${r.flash ?? "–"}</td><td>${r.rules ?? "–"}</td>
-      <td>${r.vega}</td><td>${r.avg}</td><td>${r.best} <span class="note">(${r.best_alt} km)</span></td></tr>`).join("");
+      <td>World ${r.seed}</td>${sc(r, "hybrid", r.hybrid, (r.hybrid ?? 0) > (r.rules ?? 0))}${sc(r, "agent", r.agent, r.agent > r.best)}${sc(r, "flash", r.flash, (r.flash ?? 0) > r.best)}${sc(r, "rules", r.rules, false)}
+      ${sc(r, "vega", r.vega, false)}<td>${r.avg}</td><td>${r.best} <span class="note">(${r.best_alt} km)</span>${gauge(r, "best")}</td></tr>`).join("");
   $("table").querySelectorAll("tr[data-seed]").forEach((tr) => tr.onclick = () => load(+tr.dataset.seed));
 }
 

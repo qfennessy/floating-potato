@@ -146,11 +146,13 @@ class Globe {
     sun.position.set(5, 2, 4);
     this.scene.add(sun);
 
-    const tex = new THREE.TextureLoader().load("data/venus_globe.jpg");
+    // Surface: Magellan elevation, gaps filled, coloured by height and shaded (no radar scan stripes).
+    const tex = new THREE.TextureLoader().load("data/venus_surface.jpg");
+    tex.anisotropy = 8;
     tex.colorSpace = THREE.SRGBColorSpace;
     const bump = new THREE.TextureLoader().load("data/venus_topo_0_360.jpg");
     this.planet = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 128),
-      new THREE.MeshStandardMaterial({ map: tex, bumpMap: bump, bumpScale: 4, color: 0xffc887, roughness: 0.95 }));
+      new THREE.MeshStandardMaterial({ map: tex, bumpMap: bump, bumpScale: 1.5, color: 0xffffff, roughness: 1 }));
     this.scene.add(this.planet);
 
     // The cloud deck, with a wedge cut away (centred on phi = 0, rotated to the selected balloon).

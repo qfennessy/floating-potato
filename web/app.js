@@ -14,7 +14,7 @@ const mapC = $("map"), stripC = $("strip");
 const state = { world: null, T: 0, maxT: 0, playing: true, speed: 2, last: 0, logCount: -1, index: null, aim: 56, big: new Set(),
                 sel: "hybrid", director: true, heroDone: new Set(), hero: null, frameN: 0 };
 const basemap = new Image();
-basemap.src = "data/venus_0_360.jpg";
+basemap.src = "data/venus_surface_small.jpg";
 
 // ---------- helpers ----------
 function fit(c) {
@@ -241,7 +241,7 @@ function drawMap() {
   const T = state.T, i0 = idx(T), w = state.world;
   ctx.clearRect(0, 0, W, H);
   if (basemap.complete && basemap.naturalWidth) {
-    ctx.filter = "sepia(0.9) saturate(1.6) brightness(0.75)";
+    ctx.filter = "brightness(0.85)";
     ctx.drawImage(basemap, 0, 0, W, H);
     ctx.filter = "none";
   }

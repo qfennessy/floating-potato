@@ -7,9 +7,13 @@ the first segment of the winner. The commander can narrow `targets` or `band`.
 """
 import numpy as np
 
-from venus import CAPTURE_KM, STEP_S, TARGETS, advance, gc_km
+from venus import CAPTURE_KM, LOSS_ALT, LOSS_PER_H, STEP_S, TARGETS, WEAR_ALT, WEAR_PER_H, advance, gc_km
 
-LEVELS = np.array([50.5, 52.0, 53.5, 55.0, 56.5, 58.0, 59.5, 61.5])
+# Safe levels, plus risky ones (hot layers below 50 km, the fast cloud-top jet above 62 km) that are
+# only used in sprint mode.
+LEVELS = np.array([47.0, 50.5, 52.0, 53.5, 55.0, 56.5, 58.0, 59.5, 61.5, 64.0, 66.0])
+SAFE = (LEVELS >= 50.0) & (LEVELS <= 62.0)
+POINTS_PER_DAY = 450.0   # rough score units a healthy balloon earns per day (a site is ~1000)
 SEG = 24            # steps per plan segment (6 hours)
 HORIZON = 20        # segments looked ahead (5 days, about one lap)
 
@@ -18,7 +22,8 @@ def as_targets(targets):
     """Normalise to name -> (lat, lon, value, expires_h). Fixed sites are worth 1 and never expire."""
     out = {}
     for name, t in targets.items():
-        out[name] = (t[0], t[1], t[2] if len(t) > 2 else 1.0, t[3] if len(t) > 3 else np.inf)
+        out[name] = (t[0], t[1], t[2] if len(t) > 2 else 1.0, t[3] if len(t) > 3 else np.inf,
+                     t[4] if len(t) > 4 else -1.0, t[5] if len(t) > 5 else 999.0)
     return out
 
 
@@ -28,7 +33,7 @@ WATCH_KM = 1500     # "near a watch spot" for the dwell reward
 CHANGE_COST = 25.0  # score per km of altitude change (a site is worth ~1000), scaled up as budget runs low
 
 
-def score_plans(st, plans, todo, first_hit=False, watch=None, watch_w=0.0):
+def score_plans(st, plans, todo, first_hit=False, watch=None, watch_w=0.0, end_h=None):
     """Fly every plan (N x segments level indices) from state `st` toward `todo`
     (name -> (lat, lon, value, expires_h)). Returns a score per plan, or with
     `first_hit` the step index of each plan's first capture (inf if none).
@@ -39,23 +44,32 @@ def score_plans(st, plans, todo, first_hit=False, watch=None, watch_w=0.0):
     lon = np.full(n, st.lon)
     alt = np.full(n, st.alt)
     hours = st.hours
-    tl = np.array([t for t in todo.values()]).reshape(-1, 4)
+    tl = np.array([t for t in todo.values()]).reshape(-1, 6)
     got = np.zeros((n, len(todo)), bool)
     score = np.zeros(n)
     hit = np.full(n, np.inf)
     closest = np.full(n, np.inf)
     left = max(min(getattr(st, "ballast", 45.0), getattr(st, "gas", 45.0)), 1.0)
     cost = CHANGE_COST * 45.0 / left
+    if end_h is not None:                        # ballast and gas left at the end are worthless
+        cost *= min(1.0, max(end_h - st.hours, 0.0) / 240.0)
+    surv = np.ones(n)                            # chance the balloon is still flying
+    health = np.full(n, getattr(st, "health", 1.0))
+    dt = STEP_S / 3600
     for k in range(plans.shape[1] * SEG):
         goal = LEVELS[plans[:, k // SEG]]
         prev_alt = alt
         lat, lon, alt, _ = advance(lat, lon, alt, hours, np.sign(np.round(goal - alt, 3)))
         score -= cost * np.abs(alt - prev_alt)
+        health = health - np.interp(alt, WEAR_ALT, WEAR_PER_H) * dt
+        surv *= 1 - np.interp(alt, LOSS_ALT, LOSS_PER_H) * dt * (1 + 3 * (1 - np.clip(health, 0, 1)))
+        surv *= health > 0
         hours += STEP_S / 3600
         live = hours <= tl[:, 3]
         d = gc_km(lat[:, None], lon[:, None], tl[None, :, 0], tl[None, :, 1])
-        new = (d <= CAPTURE_KM) & ~got & live[None, :]
-        score += (new * tl[None, :, 2]).sum(1) * (1000.0 - k)   # value-weighted; sooner is better
+        in_layer = (alt[:, None] >= tl[None, :, 4]) & (alt[:, None] <= tl[None, :, 5])
+        new = (d <= CAPTURE_KM) & ~got & live[None, :] & in_layer
+        score += (new * tl[None, :, 2]).sum(1) * (1000.0 - k) * surv   # only counts if still flying
         hit = np.where(new.any(1) & ~np.isfinite(hit), k, hit)
         got |= new
         d = np.where(got | ~live[None, :], np.inf, d)
@@ -65,6 +79,11 @@ def score_plans(st, plans, todo, first_hit=False, watch=None, watch_w=0.0):
             score += watch_w * (dw <= WATCH_KM).sum(1)     # near several spots = better
     if first_hit:
         return hit
+    if end_h is not None:
+        # What staying alive is worth: the days of scoring still left after this plan ends.
+        # Near the end of the mission that is almost nothing, so risk gets cheap.
+        after = max(end_h - hours, 0.0) / 24.0
+        score += POINTS_PER_DAY * after * surv * np.clip(health, 0, 1)
     # Small pull toward the nearest still-unreached target, so empty horizons still steer.
     return score - np.where(np.isfinite(closest), closest, 0) / 20.0
 
@@ -73,37 +92,43 @@ def eta_hours(st, target, max_hours, n=96, seed=0):
     """Earliest capture time (hours from now) the planner can find for one target, or None."""
     rng = np.random.default_rng(seed)
     segs = max(1, int(np.ceil(max_hours * 3600 / STEP_S / SEG)))
-    plans = np.vstack([np.full((len(LEVELS), segs), np.arange(len(LEVELS))[:, None]),
-                       rng.integers(0, len(LEVELS), (n, segs))])
+    safe = np.flatnonzero(SAFE)                  # reachability is judged with safe levels only
+    plans = np.vstack([np.full((len(safe), segs), safe[:, None]), rng.choice(safe, (n, segs))])
     hit = score_plans(st, plans, as_targets({"t": target}), first_hit=True).min()
     return None if not np.isfinite(hit) else (hit + 1) * STEP_S / 3600
 
 
-def search_planner(n=128, iters=3, elite=16, seed=0, targets=None, band=None):
-    """Return a policy(state) -> action. `targets`/`band` are the commander's knobs."""
+def search_planner(n=128, iters=3, elite=16, seed=0, targets=None, band=None, end_h=None):
+    """Return a policy(state) -> action. `targets`/`band` are the commander's knobs; end_h is when
+    the mission's scoring ends. Risky levels are only allowed after set_sprint(True)."""
     rng = np.random.default_rng(seed)
-    allowed = np.ones(len(LEVELS), bool)
-    if band:
-        allowed = (LEVELS >= band[0]) & (LEVELS <= band[1])
-    mem = {"plan": None, "t": -1, "targets": as_targets(targets or TARGETS), "watch": None, "watch_w": 0.0}
+    mem = {"plan": None, "t": -1, "targets": as_targets(targets or TARGETS), "watch": None, "watch_w": 0.0,
+           "sprint": False}
+
+    def allowed():
+        a = np.ones(len(LEVELS), bool) if mem["sprint"] else SAFE.copy()
+        if band:
+            a &= (LEVELS >= band[0]) & (LEVELS <= band[1])
+        return a
 
     def replan(st):
         # Only what's within reach in latitude: the balloon moves at most a few degrees a day.
         todo = {k: v for k, v in mem["targets"].items()
                 if k not in st.reached and v[3] > st.hours and abs(v[0] - st.lat) <= 25}
-        probs = np.tile(allowed / allowed.sum(), (HORIZON, 1))
+        ok = allowed()
+        probs = np.tile(ok / ok.sum(), (HORIZON, 1))
         keep = []
         if mem["plan"] is not None:                     # warm start: shift the last best plan
             keep.append(np.r_[mem["plan"][1:], mem["plan"][-1]])
-        keep += [np.full(HORIZON, i) for i in np.flatnonzero(allowed)]   # every fixed altitude
+        keep += [np.full(HORIZON, i) for i in np.flatnonzero(ok)]        # every fixed altitude
         for _ in range(iters):
             samp = np.array([[rng.choice(len(LEVELS), p=p) for p in probs] for _ in range(n)])
             plans = np.vstack([np.array(keep), samp])
-            s = score_plans(st, plans, todo, watch=mem["watch"], watch_w=mem["watch_w"])
+            s = score_plans(st, plans, todo, watch=mem["watch"], watch_w=mem["watch_w"], end_h=end_h)
             top = plans[np.argsort(s)[::-1][:elite]]
             keep = [top[0]]
-            counts = np.stack([(top == i).sum(0) for i in range(len(LEVELS))], 1) + 0.5 * allowed
-            probs = counts * allowed / (counts * allowed).sum(1, keepdims=True)
+            counts = np.stack([(top == i).sum(0) for i in range(len(LEVELS))], 1) + 0.5 * ok
+            probs = counts * ok / (counts * ok).sum(1, keepdims=True)
         mem["plan"] = top[0]
 
     def policy(st):
@@ -124,6 +149,14 @@ def search_planner(n=128, iters=3, elite=16, seed=0, targets=None, band=None):
         mem["watch_w"] = weight
         mem["t"] = -1
 
+    def set_sprint(on):
+        """Sprint: allow the risky levels (the planner still weighs the risk against what's at stake)."""
+        if mem["sprint"] != on:
+            mem["sprint"] = on
+            mem["plan"] = None
+            mem["t"] = -1
+
+    policy.set_sprint = set_sprint
     policy.plan = lambda: LEVELS[mem["plan"]]           # for the commander's log
     policy.set_watch = set_watch
     policy.set_targets = set_targets

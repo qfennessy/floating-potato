@@ -299,6 +299,16 @@ class Globe {
       this.dynamic.add(m);
       return { name, mesh: m, label: l };
     });
+    // Layer science: cloud-top samples float above the safe band (cyan), deep-air samples below it (red).
+    this.samples = Object.entries(world.samples || {}).map(([id, [lat, lon, lo, hi]]) => {
+      const sky = id.startsWith("SKY:");
+      const sp = glowSprite(sky ? 0x67e8f9 : 0xf43f5e, 0.07, 0.95);
+      sp.position.copy(toXYZ(lat, lon, altR(sky ? 65 : 46.5)));
+      const stalk = new THREE.Line(new THREE.BufferGeometry().setFromPoints([toXYZ(lat, lon, 1.0), sp.position]),
+        new THREE.LineBasicMaterial({ color: sky ? 0x67e8f9 : 0xf43f5e, transparent: true, opacity: 0.25 }));
+      this.dynamic.add(sp); this.dynamic.add(stalk);
+      return { id, sp, stalk };
+    });
     // Forecast path and capture disc for the selected balloon.
     this.forecast = new Line2(new LineGeometry(), new LineMaterial({ color: 0xffffff, linewidth: 2, dashed: true,
       dashSize: 0.02, gapSize: 0.015, transparent: true, opacity: 0.85, resolution: res }));
@@ -348,7 +358,7 @@ class Globe {
     const head = glowSprite(0xff3045, e.kind === "major" ? 0.22 : 0.14, 1);
     head.position.copy(a);
     this.dynamic.add(col); this.dynamic.add(head);
-    this.pulses.push({ col, head, a, b, t0: performance.now(), big: e.kind === "major" });
+    this.pulses.push({ col, head, a, b, age: 0, big: e.kind === "major" });
   }
 
   // ---------- per frame ----------
@@ -393,6 +403,11 @@ class Globe {
       ev.ground.material.opacity = 0.4;
     }
     this.updateScience(T);
+    for (const s of this.samples || []) s.sp.visible = s.stalk.visible = !agentGot.has(s.id) && !this.finished;
+    for (const r of this.runs) {                     // a lost balloon turns grey
+      const lost = this.world.runs[r].lost_h, dead = (lost != null && T >= lost) || (r === "you" && this.world.runs.you.track.at(-1)[6] === 0);
+      this.balloons[r].material.color.set(dead ? 0x555555 : COLOR[r]);
+    }
   }
 
   // Position between two 15-minute track points, so balloons glide instead of hopping.
@@ -427,6 +442,7 @@ class Globe {
     this.sciT = T; this.finishedChanged = false;
     const place = (id) => {
       if (id.startsWith("BONUS:")) return w.targets[id.slice(6)];
+      if (w.samples && w.samples[id]) return w.samples[id];
       if (w.targets[id]) return w.targets[id];
       const e = w.events.find((x) => x.id === id);
       return e ? [e.lat, e.lon] : null;
@@ -450,7 +466,8 @@ class Globe {
     }
   }
 
-  flashTrail(r) { this.flash[r] = performance.now(); }
+  flashTrail(r) { this.flash[r] = 0; }                  // age in ms, advanced only while playing
+  setPaused(p) { this.paused = p; }
 
   // Forecast: where the selected balloon goes in the next day if it keeps its current altitude.
   setForecast(points, captureLatLon) {
@@ -492,9 +509,10 @@ class Globe {
   }
 
   render() {
-    const now = performance.now(), dt = Math.min((now - this.lastMs) / 1000, 0.05);
+    const now = performance.now(), real = Math.min((now - this.lastMs) / 1000, 0.05);
     this.lastMs = now;
-    this.stepWind(dt);
+    const dt = this.paused ? 0 : real;                 // paused: the whole scene freezes (the camera still moves)
+    if (dt > 0) this.stepWind(dt);
     const sel = this.selPos();
     if (sel) this.shell.rotation.y = this.ribbons.rotation.y = sel.lon / 360 * Math.PI * 2;   // wedge on the selected balloon
     if (this.hero) {
@@ -513,7 +531,8 @@ class Globe {
     this.controls.update();
     // Eruption pulses rise from the surface into the clouds, then fade.
     for (const p of this.pulses || []) {
-      const f = (now - p.t0) / (p.big ? 2200 : 1400);
+      p.age += dt * 1000;
+      const f = p.age / (p.big ? 2200 : 1400);
       p.head.position.lerpVectors(p.a, p.b, Math.min(f * 1.4, 1));
       p.col.material.opacity = Math.max(0, 1 - f);
       p.head.material.opacity = Math.max(0, 1 - f * 0.8);
@@ -522,7 +541,8 @@ class Globe {
     if (this.pulses) this.pulses = this.pulses.filter((p) => !p.done);
     // A capture flashes through the whole trail.
     for (const r of Object.keys(this.flash || {})) {
-      const f = (now - this.flash[r]) / 1200, line = this.lines[r];
+      this.flash[r] += dt * 1000;
+      const f = this.flash[r] / 1200, line = this.lines[r];
       if (!line) continue;
       if (f >= 1) { line.material.color.set(COLOR[r]); delete this.flash[r]; continue; }
       line.material.color.set(COLOR[r]).lerp(new THREE.Color(0xffffff), 1 - f);

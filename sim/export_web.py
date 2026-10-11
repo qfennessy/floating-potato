@@ -20,7 +20,7 @@ import strategist as sg
 import venus
 from mission import fly
 from events import VOLCANOES
-from missionctl import make_messages
+from missionctl import make_messages, make_samples
 from venus import CAPTURE_KM, CORRIDOR_KM, STEP_S, TARGET_SIZE, TARGETS
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -41,7 +41,8 @@ def slim(run, label, who=None):
         "label": label, "points": run["points"], "reached": run["reached"],
         "fixed_alt": run["fixed_alt"], "laps": run["laps"], "log": log,
         "track": [[round(a, 2), round(b, 2), round(c, 2)] for a, b, c, _ in run["track"]],
-        "budget": run.get("budget", [])[::4],          # ballast and gas left, every hour
+        "budget": run.get("budget", [])[::4],          # ballast, gas and health left, every hour
+        "lost_h": run.get("lost_h"),
     }
 
 
@@ -101,6 +102,7 @@ def assemble(days):
             "capture_km": CAPTURE_KM, "corridor_km": CORRIDOR_KM,
             "targets": {k: list(v) for k, v in TARGETS.items()}, "target_size": TARGET_SIZE,
             "volcanoes": {k: list(v) for k, v in VOLCANOES.items()},
+            "samples": {k: [v[0], v[1], v[4], v[5]] for k, v in make_samples(s).items()},
             "events": er["events"], "messages": make_messages(s, days)[0], "start": er["start"], "weather": er["weather"], "forecast": venus.FORECAST,
             "fixed_points": {f"{a:g}": fixed[s][a]["points"] for a in map(float, LEVELS)}, "avg_fixed": avg,
             "runs": runs,

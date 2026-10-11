@@ -12,7 +12,15 @@ R_KM = 6051.8                       # Venus mean radius
 KM_PER_DEG = np.pi * R_KM / 180     # ~105.6 km per degree of latitude
 STEP_S = 15 * 60                    # one sim step is 15 minutes
 ALT_RATE_KM = 0.5                   # altitude change per step when ascending/descending
-CORRIDOR_KM = (50.0, 62.0)          # below: too hot for the envelope; above: acid cloud top
+CORRIDOR_KM = (50.0, 62.0)          # the safe band; outside it the envelope wears fast and can fail
+LIMITS_KM = (44.0, 68.0)            # how far a balloon can physically go
+# Envelope wear per hour (fraction of health) and chance per hour of sudden loss, by altitude.
+# Inside the band: slow ageing only. Above: sulfuric acid at the cloud tops. Below: heat.
+WEAR_ALT = [44, 46, 49, 50, 62, 63, 66, 68]
+WEAR_PER_H = [0.04, 0.02, 0.003, 0.0002, 0.0002, 0.004, 0.02, 0.04]
+LOSS_ALT = [44, 47, 50, 62, 64, 66, 68]
+LOSS_PER_H = [0.02, 0.005, 0.0, 0.0, 0.002, 0.006, 0.02]
+RISK_RNG = np.random.default_rng(0)  # mission.fly seeds this per world and balloon
 BALLAST_KM = 45.0                   # dropping ballast is how a balloon climbs: 45 km of climbing per flight
 GAS_KM = 45.0                       # venting gas is how it sinks: 45 km of sinking per flight
 SOLAR_DAY_H = 116.75 * 24           # Venus solar day in Earth hours (sub-solar point moves slowly)
@@ -53,11 +61,13 @@ def wind(lat, alt_km, local_time_h, wx=FORECAST):
     below it, plus a small thermal-tide term that lets a balloon cross the equator if
     it times its altitude to local time.
     """
-    s = (alt_km - CORRIDOR_KM[0]) / (CORRIDOR_KM[1] - CORRIDOR_KM[0])   # 0 at floor, 1 at top
-    d = np.clip((alt_km - wx["flip_km"]) / 6.0, -1.25, 1.25)           # <0 below the flip, >0 above
+    # Westward speed by altitude, shaped after probe data: slower going down (about 45 m/s at 44 km),
+    # 60 at the band floor, 100 at its top, peaking near 110 at the cloud-top jet (66 km), fading above.
+    speed = np.interp(alt_km, [44.0, 50.0, 62.0, 66.0, 68.0], [45.0, 60.0, 100.0, 110.0, 90.0])
+    d = np.clip((alt_km - wx["flip_km"]) / 6.0, -1.8, 1.8)             # <0 below the flip, >0 above
     lt = local_time_h + wx["tide_phase"]
     lat_r = np.radians(lat)
-    u = -(60.0 + 40.0 * s) * wx["zonal"] * np.cos(lat_r)
+    u = -speed * wx["zonal"] * np.cos(lat_r)
     u += 4.0 * np.cos(2 * np.pi * lt / 24.0)                             # diurnal tide on speed
     hadley = wx["hadley"] * d * np.sin(2 * lat_r)
     tide_v = 2.0 * np.sin(2 * np.pi * lt / 24.0) * d
@@ -81,7 +91,7 @@ def local_time(lon, hours):
 def advance(lat, lon, alt, hours, action, wx=FORECAST):
     """One 15-minute step for scalars or numpy arrays. Returns (lat, lon, alt, dlon).
     Defaults to the forecast weather: that is all a planner knows."""
-    alt = np.clip(alt + action * ALT_RATE_KM, *CORRIDOR_KM)
+    alt = np.clip(alt + action * ALT_RATE_KM, *LIMITS_KM)
     u, v = wind(lat, alt, local_time(lon, hours), wx)
     dlat = v * STEP_S / 1000 / KM_PER_DEG
     dlon = u * STEP_S / 1000 / (KM_PER_DEG * np.maximum(np.cos(np.radians(lat)), 0.05))
@@ -98,6 +108,8 @@ class State:
     reached: list = field(default_factory=list)
     ballast: float = BALLAST_KM     # km of climbing left
     gas: float = GAS_KM             # km of sinking left
+    health: float = 1.0             # envelope health; the balloon is lost at 0
+    alive: bool = True
 
     @property
     def local_time(self):
@@ -112,17 +124,28 @@ def step(st: State, action: int, targets=None) -> State:
     """Advance one 15-minute step. action: -1 descend, 0 hold, +1 ascend.
     Climbing spends ballast and sinking spends gas; with none left, that direction is gone.
     `targets` maps name -> (lat, lon, ...); defaults to the fixed science sites."""
+    if not st.alive:                                     # a lost balloon goes nowhere and scores nothing
+        return State(st.lat, st.lon, st.alt, st.hours + STEP_S / 3600, st.lon_flown, list(st.reached),
+                     st.ballast, st.gas, 0.0, False)
     if action > 0 and st.ballast < ALT_RATE_KM:
         action = 0
     if action < 0 and st.gas < ALT_RATE_KM:
         action = 0
     lat, lon, alt, dlon = advance(st.lat, st.lon, st.alt, st.hours, action, WX)    # the real weather
     moved = float(alt) - st.alt
-    new = State(float(lat), float(lon), float(alt), st.hours + STEP_S / 3600,
+    dt = STEP_S / 3600
+    health = st.health - float(np.interp(alt, WEAR_ALT, WEAR_PER_H)) * dt
+    p_loss = float(np.interp(alt, LOSS_ALT, LOSS_PER_H)) * dt * (1 + 3 * (1 - max(health, 0.0)))
+    alive = health > 0 and RISK_RNG.random() >= p_loss
+    new = State(float(lat), float(lon), float(alt), st.hours + dt,
                 st.lon_flown - float(dlon), list(st.reached),
-                st.ballast - max(moved, 0.0), st.gas - max(-moved, 0.0))
+                st.ballast - max(moved, 0.0), st.gas - max(-moved, 0.0), max(health, 0.0), alive)
+    if not alive:
+        return new
     for name, t in (TARGETS if targets is None else targets).items():
         if name not in new.reached and gc_km(new.lat, new.lon, t[0], t[1]) <= CAPTURE_KM:
+            if len(t) >= 6 and not (t[4] <= new.alt <= t[5]):
+                continue                                 # a layer sample: only counts inside its layer
             new.reached.append(name)
     return new
 

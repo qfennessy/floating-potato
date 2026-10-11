@@ -19,6 +19,8 @@ from events import KINDS, VOLCANOES, Event
 from venus import TARGETS
 
 BONUS = 10.0
+SAMPLE_PTS = 3.0          # risky-layer science samples
+SKY_MIN_KM, DEEP_MAX_KM = 63.0, 48.0
 PLUME_MULT = 3.0
 NEAR_LAT, FAR_LAT = 10.0, 12.0
 
@@ -74,6 +76,18 @@ def personalize(m, lat, reached, seed):
     return m, None
 
 
+def make_samples(seed, n=8):
+    """Science that only exists in the risky layers: 8 cloud-top samples (count only above 63 km,
+    in the acid layer of the fast jet) and 8 deep-air samples (count only below 48 km, in the heat).
+    name -> (lat, lon, value, expires, alt_lo, alt_hi)."""
+    rng = np.random.default_rng(50_000 + seed)
+    out = {}
+    for k in range(n):
+        out[f"SKY:{k + 1}"] = (float(rng.uniform(-50, 50)), float(rng.uniform(0, 360)), SAMPLE_PTS, np.inf, SKY_MIN_KM, 99.0)
+        out[f"DEEP:{k + 1}"] = (float(rng.uniform(-50, 50)), float(rng.uniform(0, 360)), SAMPLE_PTS, np.inf, 0.0, DEEP_MAX_KM)
+    return out
+
+
 def bonus_targets(msgs, hours):
     """Bonus targets live right now: name -> (lat, lon)."""
     return {f"BONUS:{m['site']}": (m["lat"], m["lon"]) for m in msgs
@@ -84,6 +98,8 @@ def points_for(target, t_h, lat, events_by_id, msgs):
     """What one capture is worth, given the messages in force when it happened."""
     if target.startswith("BONUS:"):
         base = BONUS
+    elif target.startswith(("SKY:", "DEEP:")):
+        base = SAMPLE_PTS
     elif target in events_by_id:
         ev = events_by_id[target]
         base = KINDS[ev.kind]["value"]

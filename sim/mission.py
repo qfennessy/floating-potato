@@ -14,7 +14,7 @@ import numpy as np
 
 import commander as cmd
 from events import VOLCANOES, detectable, generate
-from missionctl import bonus_targets, make_messages, personalize, points_for
+from missionctl import bonus_targets, make_messages, make_samples, personalize, points_for
 from planner import eta_hours, search_planner
 import venus
 from venus import KM_PER_DEG, STEP_S, TARGETS, State, drifter, gc_km, step, wind, world_start, world_weather
@@ -85,24 +85,28 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
     varied: each world gets its own launch point and real weather (from its seed); False flies the
     original fixed world (launch 15 N 300 E, weather = forecast)."""
     venus.WX = world_weather(seed) if varied else dict(venus.FORECAST)
+    import zlib
+    venus.RISK_RNG = np.random.default_rng(zlib.crc32(f"{seed}:{name}".encode()))   # this balloon's luck
     if start is None:
         start = world_start(seed) if varied else (15.0, 300.0)
     events = generate(days, seed)
     msgs, extra = make_messages(seed, days) if varied else ([], [])
     events = sorted(events + extra, key=lambda e: e.t_h)
     by_id = {e.id: e for e in events}
+    samples = make_samples(seed) if varied else {}
     delivered = []
     st = State(start[0], start[1], fixed_alt or 56.0)
-    planner = None if fixed_alt else search_planner()
+    planner = None if fixed_alt else search_planner(end_h=days * 24)
     policy = drifter(fixed_alt) if fixed_alt else planner
     known, chasing, ignored = {}, None, set()
     holder = LaneHolder()
     flags = {}
+    lost_h = None
     plan = {"focus": list(VOLCANOES), "fixed": list(TARGETS), "next_h": 0.0, "hold": hold_lat, "lane": None,
             "goto": None}
     PLACES = {**VOLCANOES, **TARGETS}
     log, track = [], [(st.lat, st.lon, st.alt, st.hours)]
-    budget = [(st.ballast, st.gas)]
+    budget = [(st.ballast, st.gas, st.health)]
 
     def say(kind, text, **extra):
         log.append({"t_h": round(st.hours, 2), "kind": kind, "text": text, **extra})
@@ -116,23 +120,27 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
             lat, lon = PLACES[plan["goto"]]
             return {f"GOTO:{plan['goto']}": (lat, lon, 10.0), **live}
         fixed = {k: TARGETS[k] for k in plan["fixed"] if k in TARGETS}
-        return {**fixed, **live}
+        layer = {k: v for k, v in samples.items() if k not in st.reached} if planner and plan.get("sprint") else {}
+        return {**fixed, **live, **layer}
 
     def restrategize():
         view = {"track": track, "known": [e for e in known.values()], "events_heard":
                 [l for l in log if l["kind"] == "detect"], "reached": list(st.reached),
                 "unvisited": [t for t in TARGETS if t not in st.reached], "days": days,
                 "lane": plan["lane"], "messages": list(delivered), "goto": plan["goto"],
-                "ballast": st.ballast, "gas": st.gas}
+                "ballast": st.ballast, "gas": st.gas, "health": st.health, "samples": samples}
         out = strategist(st, view)
         plan["focus"] = [v for v in out.get("focus", []) if v in VOLCANOES] or plan["focus"]
         plan["fixed"] = [t for t in out.get("fixed", []) if t in TARGETS]
         if "hold_lat" in out:                                 # None means roam
             plan["hold"] = None if out["hold_lat"] is None else float(out["hold_lat"])
         plan["lane"] = out.get("lane", plan["lane"])
+        plan["sprint"] = bool(out.get("sprint"))
+        planner.set_sprint(plan["sprint"])
         plan["goto"] = out.get("goto") if out.get("goto") in PLACES else None
         say("strategy", out.get("reason", ""), focus=plan["focus"], fixed=plan["fixed"], hold_lat=plan["hold"],
-            ballast=round(st.ballast, 1), gas=round(st.gas, 1),
+            ballast=round(st.ballast, 1), gas=round(st.gas, 1), health=round(st.health, 3),
+            sprint=bool(out.get("sprint")),
             lane=plan["lane"], goto=plan["goto"])
         planner.set_watch([VOLCANOES[v] for v in plan["focus"]], WATCH_W)
         planner.set_targets(planner_targets())
@@ -157,11 +165,11 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
             plan["goto"] = None
             if planner:
                 planner.set_targets(planner_targets())
-        if strategist and planner and not chasing and st.hours >= plan["next_h"]:
+        if strategist and planner and st.alive and not chasing and st.hours >= plan["next_h"]:
             plan["next_h"] = st.hours + STRATEGY_H
             restrategize()
         for ev in events:
-            if ev.id not in known and detectable(ev, st.lat, st.lon, st.hours):
+            if st.alive and ev.id not in known and detectable(ev, st.lat, st.lon, st.hours):
                 known[ev.id] = ev
                 dist = gc_km(st.lat, st.lon, ev.rep_lat, ev.rep_lon)
                 say("detect", f"{ev.spec['sensor']}: {ev.label()}, about {dist:.0f} km away",
@@ -193,7 +201,7 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
 
         # Captures are judged at the TRUE source; the planner only knows the reported spot.
         active = {**TARGETS, **{e.id: (e.lat, e.lon) for e in events if e.t_h <= st.hours < e.ends_h},
-                  **bonus_targets(delivered, st.hours)}
+                  **bonus_targets(delivered, st.hours), **samples}
         before = set(st.reached)
         if planner and plan["goto"] and not chasing:
             # Head for a place = get onto its latitude and hold it: the westward wind brings every
@@ -208,16 +216,21 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
         st = step(st, action, active)
         if planner:
             holder.observe(prev, st)
+        if not st.alive and not flags.get("lost"):
+            flags["lost"] = True
+            lost_h = st.hours
+            say("lost", f"Balloon lost at {st.alt:.1f} km, health {st.health:.0%}. No more points.")
         for what, left in (("ballast", st.ballast), ("gas", st.gas)):          # tell the log once
             if left < venus.ALT_RATE_KM and not flags.get(what):
                 flags[what] = True
                 say("budget", f"Out of {what}: can no longer {'climb' if what == 'ballast' else 'sink'}.")
         for got in set(st.reached) - before:
             what = (f"the priority site {got[6:]} (bonus)" if got.startswith("BONUS:")
+                    else f"a {'cloud-top' if got.startswith('SKY:') else 'deep-air'} sample" if got.startswith(("SKY:", "DEEP:"))
                     else got if got in TARGETS else by_id[got].label())
             say("reached", f"reached {what}", target=got, pts=points_for(got, st.hours, st.lat, by_id, delivered))
         track.append((st.lat, st.lon, st.alt, st.hours))
-        budget.append((st.ballast, st.gas))
+        budget.append((st.ballast, st.gas, st.health))
 
     points = sum(l["pts"] for l in log if l["kind"] == "reached")
     run = {
@@ -226,10 +239,12 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
         "events": [{**{k: v for k, v in e.__dict__.items() if k != "cur_value"}, "sensor": e.spec["sensor"],
                     "value": e.spec["value"], "ends_h": e.ends_h, "text": e.label()} for e in events],
         "messages": delivered,
+        "samples": {k: list(v[:2]) + [v[4], v[5]] for k, v in samples.items()},
         "targets": {k: list(v) for k, v in TARGETS.items()},
         "log": log,
         "track": np.round(np.array(track), 3).tolist(),
-        "budget": [[round(b, 1), round(g, 1)] for b, g in budget],
+        "budget": [[round(b, 1), round(g, 1), round(h, 3)] for b, g, h in budget],
+        "lost_h": lost_h, "health_left": round(st.health, 3),
         "ballast_left": round(st.ballast, 1), "gas_left": round(st.gas, 1),
     }
     RUNS.mkdir(exist_ok=True)

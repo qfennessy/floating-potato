@@ -76,17 +76,27 @@ function extendEvents(T) {
 
 // ---------- live physics: a port of sim/venus.py (keep the two in step) ----------
 const R_KM = 6051.8, KM_PER_DEG = Math.PI * R_KM / 180, STEP_S = 900, ALT_RATE = 0.5;
-const CORRIDOR = [50, 62], SOLAR_DAY_H = 116.75 * 24, CAPTURE_KM = 350;
+const CORRIDOR = [50, 62], LIMITS = [44, 68], SOLAR_DAY_H = 116.75 * 24, CAPTURE_KM = 350;
+// Envelope wear per hour and chance per hour of sudden loss, by altitude (as in sim/venus.py).
+const WEAR = [[44, 46, 49, 50, 62, 63, 66, 68], [0.04, 0.02, 0.003, 0.0002, 0.0002, 0.004, 0.02, 0.04]];
+const LOSS = [[44, 47, 50, 62, 64, 66, 68], [0.02, 0.005, 0, 0, 0.002, 0.006, 0.02]];
+const BUDGET_KM = 45;
+function interp(x, [xs, ys]) {
+  if (x <= xs[0]) return ys[0];
+  for (let k = 1; k < xs.length; k++) if (x <= xs[k]) return ys[k - 1] + (ys[k] - ys[k - 1]) * (x - xs[k - 1]) / (xs[k] - xs[k - 1]);
+  return ys[ys.length - 1];
+}
 const rad = (d) => d * Math.PI / 180;
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const mod = (x, m) => ((x % m) + m) % m;
 
 // Each world has its own real weather (world.weather); the forecast is the same everywhere.
 function wind(lat, alt, lt, wx = state.world.weather) {
-  const s = (alt - CORRIDOR[0]) / (CORRIDOR[1] - CORRIDOR[0]);
-  const d = clamp((alt - wx.flip_km) / 6, -1.25, 1.25);
+  // Westward speed: slower going down, 60 at 50 km, 100 at 62 km, about 110 in the cloud-top jet (66 km).
+  const speed = interp(alt, [[44, 50, 62, 66, 68], [45, 60, 100, 110, 90]]);
+  const d = clamp((alt - wx.flip_km) / 6, -1.8, 1.8);
   const t = lt + wx.tide_phase;
-  const u = -(60 + 40 * s) * wx.zonal * Math.cos(rad(lat)) + 4 * Math.cos(2 * Math.PI * t / 24);
+  const u = -speed * wx.zonal * Math.cos(rad(lat)) + 4 * Math.cos(2 * Math.PI * t / 24);
   const v = wx.hadley * d * Math.sin(2 * rad(lat)) + 2 * Math.sin(2 * Math.PI * t / 24) * d;
   return [u, v];
 }
@@ -100,7 +110,7 @@ function gcKm(lat1, lon1, lat2, lon2) {
 // One 15-minute step from [lat, lon, alt] at `hours`, climbing or sinking toward `aim`.
 function advance([lat, lon, alt], hours, aim) {
   const action = Math.sign(Math.round((aim - alt) * 1000) / 1000);
-  alt = clamp(alt + action * ALT_RATE, ...CORRIDOR);
+  alt = clamp(alt + action * ALT_RATE, ...LIMITS);
   const [u, v] = wind(lat, alt, localTime(lon, hours));
   const dlat = v * STEP_S / 1000 / KM_PER_DEG;
   const dlon = u * STEP_S / 1000 / (KM_PER_DEG * Math.max(Math.cos(rad(lat)), 0.05));
@@ -134,6 +144,7 @@ function personalize(m, lat, got) {
 function pointsFor(target, h, lat) {
   let base;
   if (target.startsWith("BONUS:")) base = 10;
+  else if (target.startsWith("SKY:") || target.startsWith("DEEP:")) base = 3;
   else {
     const ev = state.world.events.find((e) => e.id === target);
     base = ev ? ev.value : 1;
@@ -147,7 +158,8 @@ function pointsFor(target, h, lat) {
 // Your flight is stored like a replayed run (track + log), grown or rewound to match the clock.
 function newYou() {
   const [lat, lon] = state.world.start;
-  return { label: "You", track: [[lat, lon, 56]], log: [], aims: [], msgs: [] };
+  // track points: [lat, lon, alt, ballast left, gas left, health, alive (1/0)]
+  return { label: "You", track: [[lat, lon, 56, BUDGET_KM, BUDGET_KM, 1, 1]], log: [], aims: [], msgs: [] };
 }
 function syncYou() {
   const you = state.world.runs.you, want = idxYou(state.T);
@@ -175,13 +187,31 @@ function syncYou() {
       }
     // "TIP" is ER 2's personal alert eruption (in the shared event list for display); yours is YOU_TIP.
     const active = state.world.events.filter((e) => e.id !== "TIP" && e.t_h <= hours && hours < e.ends_h);
-    const next = advance(you.track[k], hours, state.aim);
+    const prev = you.track[k];
+    let next;
+    if (!prev[6]) next = [...prev];                            // lost: no more flying or scoring
+    else {
+      // Climbing spends ballast and sinking spends gas; with none left that way, hold altitude.
+      let aim = state.aim;
+      if (aim > prev[2] && prev[3] < ALT_RATE) aim = prev[2];
+      if (aim < prev[2] && prev[4] < ALT_RATE) aim = prev[2];
+      const [la, lo, al] = advance(prev, hours, aim), moved = al - prev[2];
+      const health = Math.max(0, prev[5] - interp(al, WEAR) * state.world.step_h);
+      const pLoss = interp(al, LOSS) * state.world.step_h * (1 + 3 * (1 - health));
+      const alive = health > 0 && rng32(state.world.seed * 100003 + k)() >= pLoss;
+      next = [la, lo, al, prev[3] - Math.max(moved, 0), prev[4] - Math.max(-moved, 0), health, alive ? 1 : 0];
+      if (!alive) you.log.push({ t_h: hours + state.world.step_h, kind: "message", text: `Your balloon was lost at ${al.toFixed(1)} km (health ${Math.round(health * 100)}%).` });
+    }
     you.track.push(next);
     you.aims.push(state.aim);
+    if (!next[6]) continue;
     const got = new Set(you.log.map((l) => l.target));
     const cands = [...Object.entries(state.world.targets).map(([n, [la, lo]]) => [n, la, lo, n]),
                    ...active.map((e) => [e.id, e.lat, e.lon, `${KIND[e.kind]}${e.site ? " near " + e.site : ""}`]),
-                   ...bonusLive(hours).map((m) => [`BONUS:${m.site}`, m.lat, m.lon, `the priority site ${m.site} (bonus)`])];
+                   ...bonusLive(hours).map((m) => [`BONUS:${m.site}`, m.lat, m.lon, `the priority site ${m.site} (bonus)`]),
+                   ...Object.entries(state.world.samples || {})            // layer samples: only inside their layer
+                     .filter(([, s]) => next[2] >= s[2] && next[2] <= s[3])
+                     .map(([id, s]) => [id, s[0], s[1], `a ${id.startsWith("SKY") ? "cloud-top" : "deep-air"} sample`])];
     const h1 = hours + state.world.step_h;
     for (const [id, la, lo, name] of cands)
       if (!got.has(id) && gcKm(next[0], next[1], la, lo) <= CAPTURE_KM)
@@ -189,18 +219,20 @@ function syncYou() {
   }
 }
 function setAim(a) {
-  state.aim = clamp(Math.round(a * 2) / 2, ...CORRIDOR);
+  state.aim = clamp(Math.round(a * 2) / 2, ...LIMITS);
   $("aim").value = state.aim;
   drawPilot();
 }
 function drawPilot() {
   const you = state.world?.runs.you;
   if (!you) return;
-  const [lat, lon, alt] = you.track[you.track.length - 1];
+  const [lat, lon, alt, ballast, gas, health, alive] = you.track[you.track.length - 1];
   const [u, v] = wind(lat, alt, localTime(lon, state.T));
   const ns = Math.abs(v) < 0.5 ? "no north-south drift" : `drifting ${v > 0 ? "north" : "south"} ${Math.abs(v).toFixed(1)} m/s`;
+  const risky = alt < CORRIDOR[0] || alt > CORRIDOR[1] ? " · ⚠ risky layer" : "";
   $("aimval").textContent = `${state.aim.toFixed(1)} km`;
-  $("pilotread").textContent = `Now ${alt.toFixed(1)} km at ${lat.toFixed(1)}°, ${lon.toFixed(0)}°E · west ${(-u).toFixed(0)} m/s · ${ns}`;
+  $("pilotread").textContent = !alive ? "Your balloon is lost." :
+    `Now ${alt.toFixed(1)} km · west ${(-u).toFixed(0)} m/s · ${ns}${risky} · health ${Math.round(health * 100)}% · ballast ${ballast.toFixed(0)} km · gas ${gas.toFixed(0)} km`;
 }
 
 // ---------- map ----------
@@ -299,7 +331,7 @@ function star(ctx, x, y, r, fill) {
 function drawStrip() {
   const [ctx, W, H] = fit(stripC);
   const w = state.world, i0 = idx(state.T), pad = 28, span = endH();
-  const [lo, hi] = [48, 64];
+  const [lo, hi] = [44, 68];
   const runs = runsIn(), ROW = 10, rowsTop = H - 16 - runs.length * ROW;   // scoring rows under the plot
   const X = (h) => pad + (h / span) * (W - pad - 8);
   const Y = (a) => 8 + (hi - a) / (hi - lo) * (rowsTop - 14);
@@ -307,7 +339,11 @@ function drawStrip() {
   ctx.fillStyle = "rgba(74,222,128,0.12)";
   ctx.fillRect(X(0), Y(w.corridor_km[1]), X(span) - X(0), Y(w.corridor_km[0]) - Y(w.corridor_km[1]));
   ctx.fillStyle = "#a89c8c"; ctx.font = "10px JetBrains Mono, monospace";
-  for (const a of [50, 56, 62]) ctx.fillText(a, 4, Y(a) + 3);
+  ctx.fillStyle = "rgba(248,113,113,0.08)";                   // risky layers
+  ctx.fillRect(X(0), Y(hi), X(span) - X(0), Y(w.corridor_km[1]) - Y(hi));
+  ctx.fillRect(X(0), Y(w.corridor_km[0]), X(span) - X(0), Y(lo) - Y(w.corridor_km[0]));
+  ctx.fillStyle = "#a89c8c";
+  for (const a of [44, 50, 56, 62, 68]) ctx.fillText(a, 4, Y(a) + 3);
   ctx.fillStyle = "#a89c8c";
   for (let d = 0; d <= span / 24; d += 5) ctx.fillText(`d${d}`, X(d * 24) - 6, H - 3);
   const SHORT = { you: "you", agent: "ER", flash: "Fl", rules: "RB", hybrid: "Hy", vega: "54", best: "fix" };
@@ -532,7 +568,7 @@ document.addEventListener("click", hideHow);
 
 // ---------- globe hookup (globe.js is a module and may load after this script) ----------
 const globe = () => window.venusGlobe;
-function globeLoad() { if (globe() && state.world) { globe().load(state.world); globe().select(state.sel); } }
+function globeLoad() { if (globe() && state.world) { globe().load(state.world); globe().select(state.sel); globe().setPaused(!state.playing); } }
 document.addEventListener("globe-ready", globeLoad);
 document.addEventListener("globe-follow", (e) => {
   $("follow").classList.toggle("on", e.detail);
@@ -644,6 +680,7 @@ function frame(now) {
 
 function setPlaying(p) {
   state.playing = p;
+  if (window.venusGlobe) window.venusGlobe.setPaused(!p);   // freeze wind, pulses and flashes too
   $("play").textContent = p ? "Pause" : state.world && state.T >= endH() ? "Replay" : "Play";
 }
 

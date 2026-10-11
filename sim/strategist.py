@@ -54,19 +54,21 @@ def build_lanes(k=6, min_gap=7.0):
 
 LANES, LANE_VOLCANOES = build_lanes()
 ROAM = "roam (no lane: fly fast and hunt the nearest unvisited sites)"
+SPRINT = "sprint (like roam, but allowed into the risky layers: the fast cloud-top jet above 62 km and the hot air below 50 km)"
+SPRINT_DAYS = 6.0   # the rulebook sprints when this many days are left (best of 0, 3, 6, 30 in testing)
 AUTOPILOT = "autopilot"
 PLACES = sorted(set(VOLCANOES) | set(TARGETS))     # names the strategist may head for
 
 
-def roam_choice(view, reason, goto=None):
-    return {"lane": ROAM, "hold_lat": None, "focus": list(VOLCANOES), "fixed": view["unvisited"],
-            "reason": reason, "goto": goto}
+def roam_choice(view, reason, goto=None, sprint=False):
+    return {"lane": SPRINT if sprint else ROAM, "hold_lat": None, "focus": list(VOLCANOES),
+            "fixed": view["unvisited"], "reason": reason, "goto": goto, "sprint": sprint}
 
 
 def lane_choice(lane, view, reason, goto=None):
     return {"lane": lane, "hold_lat": LANES[lane], "focus": LANE_VOLCANOES[lane],
             "fixed": [t for t in view["unvisited"] if abs(TARGETS[t][0] - LANES[lane]) <= 6],
-            "reason": reason, "goto": goto}
+            "reason": reason, "goto": goto, "sprint": False}
 
 
 def travel_days(lat_from, lat_to):
@@ -92,6 +94,9 @@ def rule_strategist(st, view):
     """Hold a lane while it still has at least 3 unvisited sites; otherwise roam. With many
     one-time sites, a lane runs dry after a lap or two, and roaming sweeps up new ones."""
     cur = view.get("lane")
+    if view["days"] - st.hours / 24 <= SPRINT_DAYS:
+        return roam_choice(view, f"Last {SPRINT_DAYS:g} days: surviving past day {view['days']:g} is worth nothing, "
+                                 "so sprint through the risky fast layers.", sprint=True)
     best = max(LANES, key=lambda l: lane_worth(l, st, view, cur))
     in_reach = sum(abs(TARGETS[t][0] - LANES[best]) <= REACH_DEG for t in view["unvisited"])
     if in_reach < 3:
@@ -121,6 +126,9 @@ def render_map(st, view, px=1024):
     for e in view["known"]:
         if e.site in counts:
             counts[e.site] += 1
+    for k, (lat, lon, *_rest) in view.get("samples", {}).items():
+        if k not in view["reached"]:
+            ax.plot(lon, lat, "D", color="cyan" if k.startswith("SKY:") else "red", mec="black", ms=7)
     for lane, lat in LANES.items():                     # lanes as labelled bands
         ax.axhspan(lat - REACH_DEG, lat + REACH_DEG, color="cyan", alpha=0.12)
         ax.annotate(lane, (2, lat), xytext=(0, 3), textcoords="offset points", color="cyan", fontsize=9)
@@ -159,6 +167,7 @@ def _prompt(st, view, autopilot=None):
         f"- {lane} (latitude {lat:+.0f}): about {travel_days(st.lat, lat):.1f} days to get there"
         + ("  <- CURRENT" if lane == current else "") for lane, lat in LANES.items())
     lanes += f"\n- {ROAM}" + ("  <- CURRENT" if current == ROAM else "")
+    lanes += f"\n- {SPRINT}" + ("  <- CURRENT" if current == SPRINT else "")
     if autopilot:
         lanes = (f"- {AUTOPILOT}: keep the autopilot's plan, which is: {autopilot['lane']} "
                  f"({autopilot['reason']})\n" + lanes)
@@ -171,7 +180,15 @@ def _prompt(st, view, autopilot=None):
         "The balloon steers only by altitude: low (50 km) is slower and drifts toward the equator; "
         "high (62 km) is faster and drifts toward the poles. A planner handles altitude for you.\n"
         f"Hour {st.hours:.0f} of {view['days'] * 24:.0f}. Balloon at lat {st.lat:.1f}, lon {st.lon:.1f} E, "
-        f"altitude {st.alt:.1f} km.\n"
+        f"altitude {st.alt:.1f} km, envelope health {view.get('health', 1.0):.0%}.\n"
+        "Risk: inside 50-62 km the envelope ages slowly. Above 62 km (sulfuric acid at the fast cloud-top "
+        "jet, up to ~110 m/s and a strong poleward push) and below 50 km (heat) it wears fast, and each "
+        "hour there carries a chance of losing the balloon, higher as health drops. A lost balloon scores "
+        "nothing more. Points only count until day "
+        f"{view['days']:g}: surviving past that is worth nothing, and unused ballast or gas is wasted.\n"
+        "Layer science: 8 cloud-top samples (3 points each) only count if passed above 63 km, and 8 deep-air "
+        "samples (3 points each) only below 48 km. Only sprint lets the planner fly there. On the map: "
+        "cyan diamonds are cloud-top samples, red diamonds deep-air samples.\n"
         f"Budget: ballast for {view.get('ballast', st.ballast):.0f} more km of climbing and gas for "
         f"{view.get('gas', st.gas):.0f} more km of sinking (each started at 45). When one runs out the balloon "
         "can no longer climb (or sink) for the rest of the mission. Every lane change, chase or detour "
@@ -206,7 +223,7 @@ def gemini_strategist(model=MODEL, thinking="medium", timeout=120, hybrid=False)
         "name": "choose_lane",
         "description": "Choose the latitude lane (or roam) until the next check-in, and optionally one place to head for first.",
         "parameters": {"type": "object", "properties": {
-            "lane": {"type": "string", "enum": ([AUTOPILOT] if hybrid else []) + list(LANES) + [ROAM]},
+            "lane": {"type": "string", "enum": ([AUTOPILOT] if hybrid else []) + list(LANES) + [ROAM, SPRINT]},
             "head_for": {"type": "string", "enum": ["none"] + PLACES,
                          "description": "A named site or volcano to fly to first, or none."},
             "reason": {"type": "string"}},
@@ -236,8 +253,8 @@ def gemini_strategist(model=MODEL, thinking="medium", timeout=120, hybrid=False)
             goto = args.get("head_for") if args.get("head_for") in PLACES else None
             if lane == AUTOPILOT and autopilot:
                 return {**autopilot, "goto": goto, "reason": reason}
-            if lane == ROAM:
-                return roam_choice(view, reason, goto)
+            if lane in (ROAM, SPRINT):
+                return roam_choice(view, reason, goto, sprint=lane == SPRINT)
             if lane not in LANES:
                 lane = view.get("lane") if view.get("lane") in LANES else list(LANES)[0]
             return lane_choice(lane, view, reason, goto)

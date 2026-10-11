@@ -12,7 +12,7 @@ Why it matters: Venus's surface is 460 °C and 90 atmospheres, so landers die in
 
 Win condition for the demo: the agent reaches more targets in the same number of Earth days than a balloon that rides one altitude around the planet.
 
-## Current state (Oct 11, 15:47)
+## Current state (Oct 11, 16:25)
 
 Live demo: https://venus-balloon-navigator.vercel.app
 
@@ -39,22 +39,25 @@ Team: one human (Q) and Claude Code.
 - **Volcanoes erupt in spells:** an eruption makes that volcano far likelier to erupt again over the next few days. The sensor log shows it; the rulebook ignores history.
 - **No crutches for the models:** the prompt no longer lists unvisited sites per lane; the models read them off the map image.
 
-**Fair requests (15:45):** each balloon's priority site and alert volcano are now picked within 6° of its own latitude when the message arrives; alert eruptions last 5 days (longer than a lap); "head for X" means fly there and hold X's latitude until the next check-in. Check: a strategist that simply obeys every request reached 14/20 bonuses and 12/20 alert eruptions and scored about 500.
+**Latest round (16:25): requests 10-12° away, a gas and ballast budget, and the hybrid.** Priority sites and alert volcanoes are now 10-12° of latitude from the balloon (same hemisphere), so passing them by luck is rare. Each balloon has 45 km of climbing (ballast) and 45 km of sinking (gas) per flight. The hybrid lets the rulebook fly and asks Gemini ER 2 only about messages, open requests and eruption bursts.
 
-**Scoreboard, 20 worlds, 30 Earth days each, harder worlds with fair requests.** A fixed balloon gets one altitude for every world, picked before launch:
+**Scoreboard, 20 worlds, 30 Earth days each:**
 
-| Balloon | Points | Sites | Bonus sites | Alert eruptions |
-|---|---|---|---|---|
-| Rulebook: hold a lane while it has 3+ unvisited sites, else roam | 456 | 242 | 11 | 6 |
-| Gemini Robotics-ER 2 | 388 | 163 | 9 | 12 |
-| Gemini 3.8 Flash | 376 | 157 | 6 | 10 |
-| Best single fixed altitude for all worlds (59.5 km) | 371 | 207 | 8 | 3 |
-| Fixed at 54 km, like Vega 1985 | 340 | 151 | 13 | 9 |
-| Average of the 8 fixed altitudes | 315 | | | |
+| Balloon | Points | Sites | Bonus sites | Alert eruptions | Ran out of ballast or gas |
+|---|---|---|---|---|---|
+| Rulebook | 393 | 249 | 8 | 2 | 0 |
+| Rulebook + Gemini ER 2 (hybrid) | 387 | 192 | 9 | 2 | 2 |
+| Best single fixed altitude (59.5 km) | 316 | 207 | 4 | 0 | 0 |
+| Gemini 3.8 Flash | 274 | 140 | 5 | 1 | 2 |
+| Gemini Robotics-ER 2 | 271 | 177 | 7 | 0 | 4 |
+| Average fixed altitude | 234 | | | | |
+| Fixed at 54 km, like Vega 1985 | 215 | 151 | 2 | 0 | 0 |
 
-What it says: requests within 6° are now so close that balloons that can't read them often collect the bonus anyway (Vega's drifter got the most). The models do win on alert eruptions (12 and 10 vs 6), but they still collect far fewer sites, because they detour to named places at 40 to 60% of check-ins. Next fix: requests that are reachable but not free (10 to 20° away), so reading them is what earns the bonus.
+What it says: the hybrid nearly ties the rulebook, but Gemini was consulted at 62% of check-ins (requests stay open for days) and each consult tended to detour, costing about 57 sites for one extra bonus. The models on their own struggle with the budget. The rulebook remains the one to beat.
 
-Earlier rounds, for the record: harder worlds with unreachable requests: rulebook 349, ER 2 319, Flash 306. Easier worlds: rulebook 363, Flash 303, ER 2 300.
+Earlier rounds: fair requests 6° away: rulebook 456, ER 2 388, Flash 376. Unreachable requests: rulebook 349, ER 2 319, Flash 306. Easier worlds: rulebook 363, Flash 303, ER 2 300.
+
+**Visualization (16:25):** the globe fills the screen. A cloud shell has a wedge cut away at the selected balloon to show the wind layers: amber particles flowing west at each layer's speed and bending north or south, brightest at the selected balloon's layer. Altitude is exaggerated about 30× and each balloon has a tether to the ground. Eruptions send a crimson pulse into the clouds and get a halo that shrinks as the window closes. The selected balloon shows a dashed 24-hour forecast at its current height and a capture disc. Captures light points on the surface, which stay lit when the winds dim at the finish. The "director" pauses before the selected AI balloon catches an eruption, frames the shot, and plays it slowly; the trail flashes on capture. Click a score chip to select a balloon.
 
 ## The simple version
 

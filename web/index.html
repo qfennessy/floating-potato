@@ -15,27 +15,28 @@
   </script>
 </head>
 <body>
-  <header>
-    <div>
-      <h1>Venus Balloon Navigator</h1>
-      <p class="lede">Balloons can't steer, but they can pick their wind. Higher is faster, lower is slower, and the north-south drift flips between them. Our agent picks its altitude to reach science targets and chase eruptions its sensors hear.</p>
-    </div>
-    <div class="score" id="score"></div>
-  </header>
+  <section class="hero">
+    <div id="globe" class="globe"></div>
+    <div class="mapwrap" hidden><canvas id="map"></canvas></div>
 
-  <main>
-    <section class="stage">
+    <div class="hud top">
+      <div class="brand">
+        <h1>Venus Balloon Navigator</h1>
+        <p class="lede">Balloons can't steer, but they can pick their wind. Click a balloon's score to follow it.</p>
+      </div>
+      <div class="score" id="score"></div>
+    </div>
+
+    <div class="hud bottom">
+      <p id="decision" class="decision"></p>
       <div class="pilot">
         <b>Fly it yourself</b>
-        <button id="down" aria-label="Lower your target altitude">▼ Lower</button>
+        <button id="down" aria-label="Lower your target altitude">▼</button>
         <input id="aim" type="range" min="50" max="62" step="0.5" value="56" aria-label="Your target altitude">
-        <button id="up" aria-label="Raise your target altitude">▲ Higher</button>
+        <button id="up" aria-label="Raise your target altitude">▲</button>
         <span id="aimval" class="mono">56.0 km</span>
         <span id="pilotread" class="note"></span>
-        <span class="note">Keys: ↑ ↓ change altitude, space pauses. High = fast and drifts poleward; low = slow and drifts toward the equator.</span>
       </div>
-      <div id="globe" class="globe"></div>
-      <div class="mapwrap" hidden><canvas id="map"></canvas></div>
       <div class="controls">
         <button id="play" aria-label="Play or pause">Pause</button>
         <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Mission time">
@@ -47,27 +48,31 @@
             <option value="12">fast</option>
           </select>
         </label>
-        <label>World
-          <select id="world"></select>
-        </label>
+        <label>World <select id="world"></select></label>
+        <button id="director" aria-label="Pause and frame the shot before an interception" class="on">Director on</button>
         <button id="view" aria-label="Switch between globe and flat map">Flat map</button>
-        <button id="follow" aria-label="Camera follows your balloon" class="on">Following you</button>
+        <button id="follow" aria-label="Camera follows the selected balloon" class="on">Following</button>
         <button id="sound" aria-label="Turn volcano sounds on or off" class="on">Sound on</button>
       </div>
+      <p class="fineprint">Synthetic wind simulation · altitude exaggerated about 30×</p>
+    </div>
+  </section>
+
+  <main>
+    <section class="stage">
       <div class="legend">
         <span data-run="you"><i class="sw you"></i>You</span>
+        <span data-run="hybrid"><i class="sw hybrid"></i>Rulebook + Gemini</span>
         <span data-run="agent"><i class="sw agent"></i>Gemini Robotics-ER 2</span>
         <span data-run="flash"><i class="sw flash"></i>Gemini 3.8 Flash</span>
         <span data-run="rules"><i class="sw rules"></i>Rulebook</span>
-        <span data-run="hybrid"><i class="sw hybrid"></i>Rulebook + Gemini</span>
         <span data-run="vega"><i class="sw vega"></i>Drifter at 54 km (Vega 1985)</span>
         <span data-run="best"><i class="sw best"></i>Best single fixed altitude for all worlds</span>
-        <span><i class="dot ev"></i>Event (eruption, plume, lightning)</span>
-        <span><i class="dot heard"></i>Heard by agent</span>
       </div>
+      <p class="note">On the globe: amber particles are the wind at each altitude layer (the selected balloon's layer glows); a crimson pulse marks an eruption, and its halo shrinks as the sampling window closes; the dashed line is where the selected balloon goes in the next day at its current altitude; glowing points on the surface are captured science. Keys: ↑ ↓ change your altitude, space pauses.</p>
       <h2>Altitude</h2>
       <canvas id="strip"></canvas>
-      <p class="note">Dots on the lines and ticks in the rows below mark when each balloon scored (bigger = more points; faint or hollow = didn't count because of a relay outage). The dashed line is the day-30 finish. Green band: the 50–62 km safe corridor. Below it the envelope overheats; above it the acid cloud top ends the ride. Higher means faster wind.</p>
+      <p class="note">Dots on the lines and ticks in the rows below mark when each balloon scored (bigger = more points; faint or hollow = didn't count because of a relay outage). The dashed line is the day-30 finish. Green band: the 50–62 km safe corridor.</p>
     </section>
 
     <aside>
@@ -78,13 +83,13 @@
   </main>
 
   <section class="summary">
-    <h2>All five worlds</h2>
-    <p class="note">Each world has its own launch point, its own weather (the height where north-south drift flips moves between 52 and 60 km), and its own random eruptions. A fixed balloon gets one altitude for every world, picked before launch. Points: fixed sites 1, lightning 1, eruption 2, gas plume 3. Every balloon carries the same sensors, so a drifter scores too if it happens to float through an event.</p>
+    <h2>All 20 worlds</h2>
+    <p class="note">Each world has its own launch point, its own weather (the height where north-south drift flips moves between 52 and 60 km), and its own random eruptions. A fixed balloon gets one altitude for every world, picked before launch.</p>
     <table id="table"></table>
   </section>
 
   <footer>
-    <p>Built at <a href="https://www.sundai.club/events/boston/hack-144-autonomous-spacecraft-hack">Sundai Club Hack 144</a>, Oct 11 2026. Simulated winds, not real Venus data. Maps: NASA / JPL / USGS Magellan radar mosaic and topography. 3D: three.js. Code: <a href="https://github.com/qfennessy/floating-potato">github.com/qfennessy/floating-potato</a>.</p>
+    <p>Built at <a href="https://www.sundai.club/events/boston/hack-144-autonomous-spacecraft-hack">Sundai Club Hack 144</a>, Oct 11 2026. Synthetic winds, not real Venus data. Maps: NASA / JPL / USGS Magellan radar mosaic and topography. 3D: three.js. Code: <a href="https://github.com/qfennessy/floating-potato">github.com/qfennessy/floating-potato</a>.</p>
   </footer>
 
   <div id="howtip" class="howtip" role="tooltip" hidden></div>

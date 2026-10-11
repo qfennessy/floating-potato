@@ -11,7 +11,8 @@ const KIND = { rumble: "eruption", so2: "gas plume", lightning: "lightning", maj
 
 const $ = (id) => document.getElementById(id);
 const mapC = $("map"), stripC = $("strip");
-const state = { world: null, T: 0, maxT: 0, playing: true, speed: 2, last: 0, logCount: -1, index: null, aim: 56, big: new Set() };
+const state = { world: null, T: 0, maxT: 0, playing: true, speed: 2, last: 0, logCount: -1, index: null, aim: 56, big: new Set(),
+                sel: "hybrid", director: true, heroDone: new Set(), hero: null, frameN: 0 };
 const basemap = new Image();
 basemap.src = "data/venus_0_360.jpg";
 
@@ -90,6 +91,7 @@ function wind(lat, alt, lt, wx = state.world.weather) {
   return [u, v];
 }
 const localTime = (lon, hours) => mod(12 + (lon - mod(-360 * hours / SOLAR_DAY_H, 360)) / 15, 24);
+window.wind = wind; window.localTime = localTime;      // the globe's wind particles use the same physics
 function gcKm(lat1, lon1, lat2, lon2) {
   const p1 = rad(lat1), p2 = rad(lat2), dl = rad(lon2 - lon1);
   const a = Math.sin((p2 - p1) / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
@@ -361,20 +363,21 @@ function drawStrip() {
 
 // ---------- side panels ----------
 function drawScore() {
-  const cards = [["you", "You"], ["hybrid", "Rulebook + Gemini"], ["agent", "Gemini ER 2"], ["flash", "Gemini 3.8 Flash"], ["rules", "Rulebook"],
-                 ["vega", "Vega-style drifter"], ["best", "Best single fixed altitude"]].filter(([r]) => state.world.runs[r]);
+  const cards = [["you", "You"], ["hybrid", "Rules + Gemini"], ["agent", "ER 2"], ["flash", "Flash"], ["rules", "Rulebook"],
+                 ["vega", "Vega 54 km"], ["best", "Fixed"]].filter(([r]) => state.world.runs[r]);
   const html = cards.map(([r, name]) => {
     // Everyone is scored to the same finish line: the end of the AI flights (day 30). You can keep
     // flying after that, but those points are shown separately and don't count in the race.
     const pts = pointsBy(r, Math.min(state.T, totalH()));
     const extra = r === "you" && state.T > totalH() ? pointsBy("you", state.T) - pts : 0;
     const note = r === "you" && state.T > totalH() ? `<em>final at day ${state.world.days}${extra ? ` · +${extra} after, not counted` : ""}</em>` : "";
-    return `<div class="card ${r}" data-run="${r}" title=""><b>${pts}</b><span>${name} points</span>${note}</div>`;
+    return `<div class="card ${r}${r === state.sel ? " sel" : ""}" data-run="${r}" title=""><b>${pts}</b><span>${name}</span>${note}</div>`;
   }).join("");
   if (html === state.scoreHtml) return;                 // only touch the DOM when a score changes
   state.scoreHtml = html;
   $("score").innerHTML = html;
   wireHow($("score"));
+  $("score").querySelectorAll("[data-run]").forEach((el) => el.onclick = (e) => { e.stopPropagation(); hideHow(); select(el.dataset.run); });
 }
 
 function drawLog() {
@@ -529,13 +532,67 @@ document.addEventListener("click", hideHow);
 
 // ---------- globe hookup (globe.js is a module and may load after this script) ----------
 const globe = () => window.venusGlobe;
-function globeLoad() { if (globe() && state.world) globe().load(state.world); }
+function globeLoad() { if (globe() && state.world) { globe().load(state.world); globe().select(state.sel); } }
 document.addEventListener("globe-ready", globeLoad);
 document.addEventListener("globe-follow", (e) => {
   $("follow").classList.toggle("on", e.detail);
-  $("follow").textContent = e.detail ? "Following you" : "Follow you";
+  $("follow").textContent = e.detail ? "Following" : "Follow";
 });
 function flatShown() { return !document.querySelector(".mapwrap").hidden; }
+
+// ---------- selection, decision line, forecast, director ----------
+function select(run) {
+  if (!state.world.runs[run]) return;
+  state.sel = run; state.scoreHtml = "";
+  if (globe()) { globe().select(run); globe().endHero(); }
+  state.hero = null;
+}
+function selIndex() {
+  const tr = state.world.runs[state.sel].track;
+  return state.sel === "you" ? tr.length - 1 : Math.min(idx(state.T), tr.length - 1);
+}
+function drawDecision() {
+  const r = state.sel, w = state.world, el = $("decision");
+  const [lat, , alt] = w.runs[r].track[selIndex()];
+  let text;
+  if (r === "you") text = `<b style="color:${COLOR.you}">You:</b> aiming for ${state.aim.toFixed(1)} km.`;
+  else if (r === "vega" || r === "best") text = `<b style="color:${COLOR[r]}">${r === "vega" ? "Vega drifter" : "Fixed balloon"}:</b> parked at ${alt.toFixed(1)} km, going wherever the wind goes.`;
+  else {
+    const last = w.runs[r].log.filter((l) => l.kind === "strategy" && l.t_h <= state.T).pop();
+    const name = { agent: "ER 2", flash: "Flash", rules: "Rulebook", hybrid: "Rules + Gemini" }[r];
+    const one = last ? last.text.replace(/^(Autopilot|Gemini \([^)]*\)): /, "").split(/(?<=[.!?])\s/)[0] : "Launching.";
+    text = `<b style="color:${COLOR[r]}">${name}:</b> ${escapeHtml(one)}`;
+  }
+  if (el.dataset.html !== text) { el.innerHTML = text; el.dataset.html = text; }
+}
+function forecastSel() {
+  // Where the selected balloon goes in the next day if it keeps its current altitude (yours: your aim).
+  const tr = state.world.runs[state.sel].track, i = selIndex();
+  let p = tr[i].slice(0, 3);
+  const aim = state.sel === "you" ? state.aim : p[2], pts = [p];
+  for (let k = 0; k < 96; k += 1) { p = advance(p, (i + k) * state.world.step_h, aim); if (k % 2) pts.push(p); }
+  return pts;
+}
+function director() {
+  // Before the selected AI balloon catches an eruption: pause, frame the shot, then resume slowly.
+  const r = state.sel, w = state.world;
+  if (!state.director || r === "you" || !globe()) return;
+  if (state.hero) {
+    const h = state.hero, now = performance.now();
+    if (h.phase === "frame" && now - h.start > 1800) { h.phase = "slow"; state.speed = 0.5; setPlaying(true); }
+    if (h.phase === "slow" && state.T > h.t + 2.5) { state.speed = h.speed; $("speed").value = String(h.speed); globe().endHero(); state.hero = null; }
+    return;
+  }
+  if (!state.playing) return;
+  const next = w.runs[r].log.find((l) => l.kind === "reached" && l.t_h > state.T && l.t_h - state.T < 5
+    && !state.heroDone.has(`${r}:${l.target}`) && w.events.some((e) => e.id === l.target && e.kind !== "lightning"));
+  if (!next) return;
+  state.heroDone.add(`${r}:${next.target}`);
+  const ev = w.events.find((e) => e.id === next.target);
+  setPlaying(false);
+  globe().frameHero([globe().latLonOf(r), globe().eventPos(ev)]);
+  state.hero = { t: next.t_h, phase: "frame", start: performance.now(), speed: state.speed };
+}
 
 // ---------- loop ----------
 function frame(now) {
@@ -547,7 +604,10 @@ function frame(now) {
       if (state.T >= endH()) setPlaying(false);
     }
     state.maxT = Math.max(state.maxT, state.T, totalH());
-    syncYou(); drawPilot(); sounds(dt);
+    syncYou(); drawPilot(); sounds(dt); director(); drawDecision();
+    state.frameN += 1;
+    if (globe() && state.frameN % 6 === 0) globe().setForecast(forecastSel());
+    if (globe()) globe().setFinished(state.T >= totalH());
     const ym = state.world.runs.you.msgs;
     if (globe() && ym.length !== state.markerCount) { state.markerCount = ym.length; globe().setMarkers(ym); }
     $("scrub").value = Math.round(state.T / endH() * 1000);
@@ -574,6 +634,8 @@ async function load(seed) {
   state.big = new Set(Object.entries(state.world.target_size || {}).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k]) => k));
   state.world.runs.you = newYou();
   setAim(56);
+  state.heroDone = new Set(); state.hero = null;
+  if (!state.world.runs[state.sel]) state.sel = state.world.runs.hybrid ? "hybrid" : "agent";
   $("world").value = seed;
   $("who").textContent = `Commander: ${state.world.commander}. Lines appear as the mission clock passes them.`;
   drawTable(); globeLoad(); setPlaying(true);
@@ -605,6 +667,12 @@ async function init() {
     $("follow").hidden = flat;
   };
   $("follow").onclick = () => globe() && globe().setFollow(!globe().follow);
+  $("director").onclick = () => {
+    state.director = !state.director;
+    $("director").textContent = state.director ? "Director on" : "Director off";
+    $("director").classList.toggle("on", state.director);
+    if (!state.director && state.hero) { state.speed = state.hero.speed; globe().endHero(); state.hero = null; setPlaying(true); }
+  };
   wireHow(document.querySelector(".legend"));
   $("sound").onclick = () => {
     audio.on = !audio.on;

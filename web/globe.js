@@ -21,7 +21,7 @@ const SHELL_R = 1.175;                      // the visible cloud deck, above the
 const LAYERS = [47, 50, 53, 56, 59, 62, 65];
 const BAND = 14;                            // wind highways span this many degrees either side of the balloon
 const PER_LAYER = 380;
-const WEDGE = 1.5;                          // radians of cloud cut away, centred on the selected balloon
+const HALF_LON = 55;                        // wind particles span this many degrees either side of the balloon
 
 // lat/lon (deg, lon 0..360 E) -> point on a sphere, matching three's SphereGeometry UVs.
 function toXYZ(lat, lon, r) {
@@ -155,9 +155,10 @@ class Globe {
 
     // The cloud deck, with a wedge cut away (centred on phi = 0, rotated to the selected balloon).
     this.shell = new THREE.Mesh(
-      new THREE.SphereGeometry(SHELL_R, 128, 64, WEDGE / 2, Math.PI * 2 - WEDGE),
+      new THREE.SphereGeometry(SHELL_R, 64, 32),
       new THREE.MeshStandardMaterial({ map: cloudTexture(), color: 0xf3dcae, transparent: true, opacity: 0.38,
         side: THREE.FrontSide, depthWrite: false, roughness: 1 }));
+    this.shell.visible = false;                // the cut cloud shell read as a hard-edged box; just the haze
     this.scene.add(this.shell);
     this.scene.add(atmosphere(SHELL_R + 0.06));
 
@@ -175,16 +176,18 @@ class Globe {
     this.ribbons = new THREE.Group();       // ribbons, built around phi = 0 and rotated to the wedge
     this.scene.add(this.wind); this.scene.add(this.ribbons);
     this.layers = LAYERS.map((alt) => {
-      const pos = new Float32Array(PER_LAYER * 3);
+      const pos = new Float32Array(PER_LAYER * 3), col = new Float32Array(PER_LAYER * 3);
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      g.setAttribute("color", new THREE.BufferAttribute(col, 3));
       const pts = new THREE.Points(g, new THREE.PointsMaterial({ map: GLOW, color: 0xffb347, size: 0.022, transparent: true,
-        opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending }));
+        opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending, vertexColors: true }));
       pts.frustumCulled = false;
       const lat = new Float32Array(PER_LAYER), lon = new Float32Array(PER_LAYER);
       const ribbon = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: 0xffa040,
         transparent: true, opacity: 0.05, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
       this.wind.add(pts); this.ribbons.add(ribbon);
+      ribbon.visible = false;                  // no hard-edged ribbons: particles fade out softly instead
       return { alt, pts, lat, lon, ribbon, center: null, seeded: false };
     });
   }
@@ -192,7 +195,8 @@ class Globe {
   ribbonGeometry(alt, center) {
     const lo = Math.max(-80, center - BAND), hi = Math.min(80, center + BAND);
     // Only inside the cut-away wedge: that is where the layers are on show.
-    return new THREE.SphereGeometry(altR(alt), 48, 6, -WEDGE / 2, WEDGE, (90 - hi) / 180 * Math.PI, (hi - lo) / 180 * Math.PI);
+    const w = HALF_LON * 2 * Math.PI / 180;
+    return new THREE.SphereGeometry(altR(alt), 48, 6, -w / 2, w, (90 - hi) / 180 * Math.PI, (hi - lo) / 180 * Math.PI);
   }
 
   stepWind(dtReal) {
@@ -200,7 +204,7 @@ class Globe {
     const sel = this.selPos();
     if (!sel) return;
     const center = sel.lat, selAlt = sel.alt;
-    const half = WEDGE / 2 * 180 / Math.PI;                 // the wedge spans sel.lon +/- half degrees
+    const half = HALF_LON;                                  // particles span sel.lon +/- half degrees
     const east = sel.lon + half;
     const inWedge = (lon) => Math.abs(((lon - sel.lon + 540) % 360) - 180) <= half;
     for (const L of this.layers) {
@@ -222,7 +226,8 @@ class Globe {
       L.ribbon.material.opacity = (near ? 0.16 : 0.045) * dim;
       // Move each particle with this layer's wind: westward speed, and its north-south drift
       // exaggerated so the bending is visible.
-      const p = L.pts.geometry.attributes.position.array, r = altR(L.alt), T = this.T || 0;
+      const p = L.pts.geometry.attributes.position.array, c = L.pts.geometry.attributes.color.array;
+      const r = altR(L.alt), T = this.T || 0;
       for (let k = 0; k < PER_LAYER; k++) {
         const [u, v] = window.wind(L.lat[k], L.alt, window.localTime(L.lon[k], T));
         L.lon[k] = mod(L.lon[k] + u * 0.05 * dtReal / Math.max(Math.cos(L.lat[k] * Math.PI / 180), 0.2), 360);
@@ -232,8 +237,13 @@ class Globe {
         }
         const q = toXYZ(L.lat[k], L.lon[k], r);
         p[k * 3] = q.x; p[k * 3 + 1] = q.y; p[k * 3 + 2] = q.z;
+        // Soft edges: brightness falls off toward the edges of the band, in latitude and longitude.
+        const dLon = Math.abs(((L.lon[k] - sel.lon + 540) % 360) - 180) / half, dLat = Math.abs(L.lat[k] - center) / BAND;
+        const f = Math.max(0, 1 - dLon ** 2) * Math.max(0, 1 - dLat ** 2);
+        c[k * 3] = c[k * 3 + 1] = c[k * 3 + 2] = f;
       }
       L.pts.geometry.attributes.position.needsUpdate = true;
+      L.pts.geometry.attributes.color.needsUpdate = true;
     }
   }
 

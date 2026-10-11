@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Venus Balloon Navigator</title>
+  <meta name="description" content="An AI flies a balloon through the clouds of Venus by choosing its altitude, and chases eruptions its sensors pick up.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Venus Balloon Navigator</h1>
+      <p class="lede">Balloons can't steer, but they can pick their wind. Higher is faster, lower is slower, and the north-south drift flips between them. Our agent picks its altitude to reach science targets and chase eruptions its sensors hear.</p>
+    </div>
+    <div class="score" id="score"></div>
+  </header>
+
+  <main>
+    <section class="stage">
+      <div class="mapwrap"><canvas id="map"></canvas></div>
+      <div class="controls">
+        <button id="play" aria-label="Play or pause">Pause</button>
+        <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Mission time">
+        <span id="clock" class="mono">day 0.0</span>
+        <label>Speed
+          <select id="speed">
+            <option value="2">slow</option>
+            <option value="5" selected>normal</option>
+            <option value="12">fast</option>
+          </select>
+        </label>
+        <label>World
+          <select id="world"></select>
+        </label>
+      </div>
+      <div class="legend">
+        <span><i class="sw agent"></i>Agent</span>
+        <span><i class="sw vega"></i>Drifter at 54 km (Vega 1985)</span>
+        <span><i class="sw best"></i>Best fixed altitude, chosen in hindsight</span>
+        <span><i class="dot ev"></i>Event (eruption, plume, lightning)</span>
+        <span><i class="dot heard"></i>Heard by agent</span>
+      </div>
+      <h2>Altitude</h2>
+      <canvas id="strip"></canvas>
+      <p class="note">Green band: the 50–62 km safe corridor. Below it the envelope overheats; above it the acid cloud top ends the ride. Higher means faster wind.</p>
+    </section>
+
+    <aside>
+      <h2>Commander log</h2>
+      <p class="note" id="who"></p>
+      <ol id="log" class="log"></ol>
+    </aside>
+  </main>
+
+  <section class="summary">
+    <h2>All five worlds</h2>
+    <p class="note">Each world has its own random eruptions. Points: fixed sites 1, lightning 1, eruption 2, gas plume 3. Every balloon carries the same sensors, so a drifter scores too if it happens to float through an event.</p>
+    <table id="table"></table>
+  </section>
+
+  <footer>
+    <p>Built at <a href="https://www.sundai.club/events/boston/hack-144-autonomous-spacecraft-hack">Sundai Club Hack 144</a>, Oct 11 2026. Simulated winds, not real Venus data. Map: NASA / JPL / USGS Magellan radar mosaic. Code: <a href="https://github.com/qfennessy/floating-potato">github.com/qfennessy/floating-potato</a>.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

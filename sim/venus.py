@@ -20,7 +20,7 @@ TARGETS = {
     "Alpha Regio": (-22.0, 4.8),
     "Maxwell Montes": (65.2, 3.3),
     "Beta Regio": (25.3, 282.8),
-    "SO2 plume (Idunn Mons)": (-46.6, 214.5),
+    "Idunn Mons": (-46.6, 214.5),
 }
 CAPTURE_KM = 350.0
 

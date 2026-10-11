@@ -599,6 +599,30 @@ document.addEventListener("globe-follow", (e) => {
 });
 function flatShown() { return !document.querySelector(".mapwrap").hidden; }
 
+
+// ---------- Venus facts: one short caption at a time, shown when the sim makes it relevant ----------
+const FACTS = [
+  { id: "pioneers", when: () => state.T > 1, text: "Venus was the first planet a spacecraft flew past (Mariner 2, 1962) and the first another world was landed on (Venera 7, 1970). In 1985 the Vega balloons floated here for two days." },
+  { id: "superrotation", when: () => state.T > 10, text: "The clouds circle Venus in about 4 days, while the planet itself takes 243 days to turn once. That fast-moving sky is what carries every balloon here." },
+  { id: "volcanoes", when: () => state.world.events.some((e) => e.kind !== "lightning" && e.t_h <= state.T), text: "Venus has more than 1,600 major volcanoes, and some are probably still active. Its whole surface was shaped by volcanism." },
+  { id: "message", when: () => msgs().some((m) => m.t_h <= state.T), text: "A message from Earth takes between 2 and 14.5 minutes to arrive, depending on where both planets are. A balloon here has to make its own decisions." },
+  { id: "deep", when: () => selAlt() < 50, text: "Below the clouds it only gets worse: about 465°C at the surface, hot enough to melt lead, under 92 times Earth's air pressure, like being 900 m deep in the ocean." },
+  { id: "acid", when: () => selAlt() > 62, text: "Up at the cloud tops, sulfuric acid rain forms, then evaporates before it reaches the ground. It never lands." },
+  { id: "daynight", when: () => state.T > 72, text: "A Venus day is longer than its year: one turn takes 243 Earth days, one orbit 225. It spins backwards, so the sun rises in the west, about every 117 Earth days." },
+];
+const facts = { on: true, shown: new Set(), lastMs: -1e9, hideAt: 0 };
+function selAlt() { const tr = state.world.runs[state.sel].track; return tr[selIndex()][2]; }
+function drawFacts() {
+  const el = $("fact"), now = performance.now();
+  if (facts.hideAt && now > facts.hideAt) { el.classList.remove("show"); facts.hideAt = 0; }
+  if (!facts.on || !state.playing || state.hero || now - facts.lastMs < 45000) return;   // at most one a minute-ish
+  const f = FACTS.find((x) => !facts.shown.has(x.id) && x.when());
+  if (!f) return;
+  facts.shown.add(f.id); facts.lastMs = now; facts.hideAt = now + 9000;
+  el.textContent = f.text;
+  el.classList.add("show");
+}
+
 // ---------- selection, decision line, forecast, director ----------
 function select(run) {
   if (!state.world.runs[run]) return;
@@ -682,7 +706,7 @@ function frame(now) {
       if (state.T >= endH()) setPlaying(false);
     }
     state.maxT = Math.max(state.maxT, state.T, totalH());
-    syncYou(); drawPilot(); sounds(dt); director(); drawDecision();
+    syncYou(); drawPilot(); sounds(dt); director(); drawDecision(); drawFacts();
     if (state.frameN % 10 === 0) drawWindPanel();
     state.frameN += 1;
     if (globe() && state.frameN % 6 === 0) globe().setForecast(forecastSel());
@@ -715,6 +739,7 @@ async function load(seed) {
   state.world.runs.you = newYou();
   setAim(56);
   state.heroDone = new Set(); state.hero = null;
+  facts.shown = new Set(); facts.lastMs = -1e9; $("fact").classList.remove("show");
   if (!state.world.runs[state.sel]) state.sel = state.world.runs.hybrid ? "hybrid" : "agent";
   $("world").value = seed;
   $("who").textContent = `Commander: ${state.world.commander}. Lines appear as the mission clock passes them.`;
@@ -754,6 +779,13 @@ async function init() {
     $("follow").hidden = flat;
   };
   $("follow").onclick = () => globe() && globe().setFollow(!globe().follow);
+  $("facts").onclick = () => {
+    facts.on = !facts.on;
+    $("facts").textContent = facts.on ? "Facts on" : "Facts off";
+    $("facts").classList.toggle("on", facts.on);
+    if (!facts.on) $("fact").classList.remove("show");
+  };
+  $("factlist").innerHTML = FACTS.map((f) => `<li>${escapeHtml(f.text)}</li>`).join("");
   $("director").onclick = () => {
     state.director = !state.director;
     $("director").textContent = state.director ? "Director on" : "Director off";

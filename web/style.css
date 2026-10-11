@@ -180,3 +180,12 @@ main { margin-top: 16px; }
 .score .card.dead { opacity: 0.55; }
 .summary .gauge-key { font-size: 12px; color: var(--muted); }
 .summary .gauge-key i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin: 0 4px 0 10px; }
+
+/* Venus fact caption: one line, fades in and out above the decision line */
+.fact { margin: 0 0 6px; max-width: 72ch; font-size: 13px; color: #f3e3c3; background: rgba(20,17,15,0.7);
+  border-left: 3px solid #e9cf98; border-radius: 6px; padding: 6px 10px; opacity: 0; transform: translateY(4px);
+  transition: opacity .8s ease, transform .8s ease; pointer-events: none; min-height: 0; }
+.fact.show { opacity: 1; transform: none; }
+.fact:empty { display: none; }
+.venusfacts ul { margin: 0; padding-left: 18px; color: var(--muted); max-width: 90ch; }
+.venusfacts li { margin: 6px 0; }

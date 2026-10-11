@@ -7,7 +7,7 @@
   <meta name="description" content="An AI flies a balloon through the clouds of Venus by choosing its altitude, and chases eruptions its sensors pick up.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
-  <link rel="stylesheet" href="style.css?v=202610111730">
+  <link rel="stylesheet" href="style.css?v=202610111736">
   <script type="importmap">
     { "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -30,6 +30,7 @@
     <div id="windpanel" class="windpanel" aria-label="Wind at each altitude where the selected balloon is"></div>
 
     <div class="hud bottom">
+      <p id="fact" class="fact" aria-live="polite"></p>
       <p id="decision" class="decision"></p>
       <div class="pilot">
         <b>Fly it yourself</b>
@@ -52,6 +53,7 @@
         </label>
         <label>World <select id="world"></select></label>
         <button id="director" aria-label="Pause and frame the shot before an interception" class="on">Director on</button>
+        <button id="facts" aria-label="Show short Venus facts during the flight" class="on">Facts on</button>
         <button id="view" aria-label="Switch between globe and flat map">Flat map</button>
         <button id="follow" aria-label="Camera follows the selected balloon" class="on">Following</button>
         <button id="sound" aria-label="Turn volcano sounds on or off" class="on">Sound on</button>
@@ -91,12 +93,17 @@
     <table id="table"></table>
   </section>
 
+  <section class="summary venusfacts">
+    <h2>Venus facts</h2>
+    <ul id="factlist"></ul>
+  </section>
+
   <footer>
     <p>Built at <a href="https://www.sundai.club/events/boston/hack-144-autonomous-spacecraft-hack">Sundai Club Hack 144</a>, Oct 11 2026. Synthetic winds, not real Venus data. Maps: NASA / JPL / USGS Magellan radar mosaic and topography. 3D: three.js. Code: <a href="https://github.com/qfennessy/floating-potato">github.com/qfennessy/floating-potato</a>.</p>
   </footer>
 
   <div id="howtip" class="howtip" role="tooltip" hidden></div>
-  <script src="app.js?v=202610111730"></script>
-  <script type="module" src="globe.js?v=202610111730"></script>
+  <script src="app.js?v=202610111736"></script>
+  <script type="module" src="globe.js?v=202610111736"></script>
 </body>
 </html>

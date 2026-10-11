@@ -12,7 +12,7 @@ Why it matters: Venus's surface is 460 °C and 90 atmospheres, so landers die in
 
 Win condition for the demo: the agent reaches more targets in the same number of Earth days than a balloon that rides one altitude around the planet.
 
-## Current state (Oct 11, 13:25)
+## Current state (Oct 11, 14:20)
 
 Live demo: https://venus-balloon-navigator.vercel.app
 
@@ -30,20 +30,22 @@ Team: one human (Q) and Claude Code.
 | Demo website | Live on Vercel. Replays saved runs, so it can't crash on stage. Rebuild data with `uv run --with numpy --with pillow --with matplotlib python sim/export_web.py --gemini`, then push to `main`: Vercel deploys `web/` on every push | `web/` |
 | Pitch sketch | Done (from an earlier version of the agent) | `docs/pitch_sketch.png` |
 
-**What we learned:** because the wind only blows west, a balloon can't stay near a place. It can only choose a latitude and pass everything in that lane once a lap. So the winning move is picking the right lane and staying in it. Switching lanes costs days, and chasing far-off events cost points in every test.
+**What we learned:** because the wind only blows west, a balloon can't stay near a place. It can only choose a latitude and pass everything in that lane once a lap. So the winning move is picking the right lane and staying in it.
 
-**Scoreboard, 20 random worlds, 10 Earth days each** (`uv run --with numpy --with matplotlib python sim/compare.py`):
+**Every world is different** (added 14:15): each world now has its own launch point (30°S to 30°N) and its own weather. The height where north-south drift flips moves between 52 and 60 km, and wind speed, push strength and the daily tide vary. Before this, every world launched from 15°N, 300°E with the same winds, and a balloon parked at 58 km drifted into the busy 22°N lane by luck and matched the agent. The agent only knows the forecast; its lane holder records the push it actually feels at each height. (That learning doesn't change the score yet: the top and bottom of the corridor always push the expected way, so trusting the forecast does as well.)
+
+**Scoreboard, 20 worlds, 10 Earth days each.** A fixed balloon gets one altitude for every world, picked before launch, so the fair rival is the best single altitude across all worlds:
 
 | Balloon | Points |
 |---|---|
-| Agent (holds the busiest lane) | 173 |
-| Average of the 8 fixed altitudes | 72 |
-| Fixed at 54 km, like Vega 1985 | 27 |
-| Luckiest single fixed altitude (58 km) | 176 |
+| Agent, Gemini Robotics-ER 2 strategist (on the website) | 81 |
+| Agent, rule strategist (`uv run --with numpy --with matplotlib python sim/compare.py`) | 69 |
+| Best single fixed altitude for all worlds (56.5 km) | 41 |
+| Fixed at 54 km, like Vega 1985 | 32 |
+| Average of the 8 fixed altitudes | 32 |
+| 58 km, the old lucky altitude | 24 |
 
-The agent scores well over twice the average fixed altitude. Only one of the eight fixed altitudes keeps up, and you would have to guess it before launch. 58 km happens to drift into the same northern lane on its own from our launch point.
-
-The five demo worlds on the website use Gemini as strategist: agent 28, Vega drifter 5, average fixed altitude 13.4.
+Scores per world are small and noisy (0 to 13 points), so single worlds can go either way; worlds 1 to 5 happen to be bad for the agent. Known weakness: the equator volcanoes spread from 0.5°N to 8.5°N, wider than the 700 km a balloon can sweep, so holding the middle of that lane catches only Ozza Mons.
 
 ## The simple version
 

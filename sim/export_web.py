@@ -13,12 +13,14 @@ from PIL import Image
 
 import commander as cmd
 import strategist as sg
+import venus
 from mission import fly
 from venus import CAPTURE_KM, CORRIDOR_KM, STEP_S, TARGETS
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 LEVELS = np.arange(50.5, 62.0, 1.5)
+ALL_SEEDS = list(range(1, 21))
 
 
 def slim(run, label):
@@ -48,20 +50,27 @@ def main():
     commander = cmd.gemini_commander() if a.gemini else cmd.rule_commander
     strategist = sg.gemini_strategist() if a.gemini else sg.rule_strategist
     who = "Gemini Robotics-ER 2" if a.gemini else "rule-based"
+    # The fair rival: ONE fixed altitude for every world, chosen as the best over all demo worlds.
+    # (Cheap to recompute here, so parallel per-seed runs all agree on it.)
+    pts = {float(alt): sum(fly("pick", a.days, seed=s, fixed_alt=float(alt))["points"] for s in ALL_SEEDS)
+           for alt in LEVELS}
+    single = max(pts, key=pts.get)
     for seed in a.seeds:
         agent = fly(f"agent_s{seed}", a.days, seed=seed, commander=commander, strategist=strategist)
         vega = fly(f"vega_s{seed}", a.days, seed=seed, fixed_alt=54.0)
         drifters = [fly(f"d{alt:g}_s{seed}", a.days, seed=seed, fixed_alt=float(alt)) for alt in LEVELS]
-        best = max(drifters, key=lambda r: r["points"])
+        best = next(d for d in drifters if d["fixed_alt"] == single)
         world = {
             "seed": seed, "days": a.days, "step_h": STEP_S / 3600, "commander": who,
             "capture_km": CAPTURE_KM, "corridor_km": CORRIDOR_KM,
             "targets": {k: list(v) for k, v in TARGETS.items()},
             "events": agent["events"],
+            "start": list(agent["start"]), "weather": venus.WX, "forecast": venus.FORECAST,
+            "fixed_points": {f"{d['fixed_alt']:g}": d["points"] for d in drifters},
             "runs": {
                 "agent": slim(agent, f"Agent ({who} commander)"),
                 "vega": slim(vega, "Drifter at 54 km, like Vega 1985"),
-                "best": slim(best, f"Best fixed altitude ({best['fixed_alt']:g} km, chosen in hindsight)"),
+                "best": slim(best, f"Best single fixed altitude for all worlds ({single:g} km)"),
             },
         }
         avg = float(np.mean([d["points"] for d in drifters]))
@@ -69,7 +78,8 @@ def main():
         (WEB / "data" / f"world{seed}.json").write_text(json.dumps(world, separators=(",", ":")))
         fb = sum("rule fallback" in l["text"] for l in agent["log"])
         print(f"world {seed}: agent {agent['points']:.0f}  vega {vega['points']:.0f}  avg fixed {avg:.1f}  "
-              f"best {best['points']:.0f} @ {best['fixed_alt']:g} km  (fallbacks {fb})", flush=True)
+              f"single best ({single:g} km) {best['points']:.0f}  flip {venus.WX['flip_km']:.1f} km  "
+              f"(fallbacks {fb})", flush=True)
     # Rebuild the index from every world file, so worlds can be exported in parallel runs.
     rows = []
     for f in sorted((WEB / "data").glob("world*.json"), key=lambda f: int(f.stem[5:])):

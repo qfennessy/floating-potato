@@ -45,10 +45,13 @@ const rad = (d) => d * Math.PI / 180;
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const mod = (x, m) => ((x % m) + m) % m;
 
-function wind(lat, alt, lt) {
+// Each world has its own real weather (world.weather); the forecast is the same everywhere.
+function wind(lat, alt, lt, wx = state.world.weather) {
   const s = (alt - CORRIDOR[0]) / (CORRIDOR[1] - CORRIDOR[0]);
-  const u = -(60 + 40 * s) * Math.cos(rad(lat)) + 4 * Math.cos(2 * Math.PI * lt / 24);
-  const v = 6 * (2 * s - 1) * Math.sin(2 * rad(lat)) + 2 * Math.sin(2 * Math.PI * lt / 24) * (2 * s - 1);
+  const d = clamp((alt - wx.flip_km) / 6, -1.25, 1.25);
+  const t = lt + wx.tide_phase;
+  const u = -(60 + 40 * s) * wx.zonal * Math.cos(rad(lat)) + 4 * Math.cos(2 * Math.PI * t / 24);
+  const v = wx.hadley * d * Math.sin(2 * rad(lat)) + 2 * Math.sin(2 * Math.PI * t / 24) * d;
   return [u, v];
 }
 const localTime = (lon, hours) => mod(12 + (lon - mod(-360 * hours / SOLAR_DAY_H, 360)) / 15, 24);
@@ -69,7 +72,7 @@ function advance([lat, lon, alt], hours, aim) {
 
 // Your flight is stored like a replayed run (track + log), grown or rewound to match the clock.
 function newYou() {
-  const [lat, lon] = state.world.runs.agent.track[0];
+  const [lat, lon] = state.world.start;
   return { label: "You", track: [[lat, lon, 56]], log: [], aims: [] };
 }
 function syncYou() {
@@ -227,7 +230,7 @@ function drawStrip() {
 
 // ---------- side panels ----------
 function drawScore() {
-  const cards = [["you", "You"], ["agent", "AI agent"], ["vega", "Vega-style drifter"], ["best", "Best fixed altitude"]];
+  const cards = [["you", "You"], ["agent", "AI agent"], ["vega", "Vega-style drifter"], ["best", "Best single fixed altitude"]];
   $("score").innerHTML = cards.map(([r, name]) => {
     const pts = reachedBy(r, state.T).reduce((s, t) => s + valueOf(t), 0);
     return `<div class="card ${r}"><b>${pts}</b><span>${name} points</span></div>`;
@@ -250,7 +253,7 @@ function drawTable() {
   const rows = state.index.worlds;
   const tot = (k) => rows.reduce((s, r) => s + r[k], 0);
   $("table").innerHTML =
-    `<tr><th>World</th><th>Agent</th><th>Drifter 54 km</th><th>Average fixed altitude</th><th>Best fixed altitude</th></tr>` +
+    `<tr><th>World</th><th>Agent</th><th>Drifter 54 km</th><th>Average fixed altitude</th><th>Best single fixed altitude</th></tr>` +
     rows.map((r) => `<tr class="${r.seed === state.world.seed ? "current" : ""}" data-seed="${r.seed}" style="cursor:pointer">
       <td>World ${r.seed}</td><td class="${r.agent > r.vega ? "win" : ""}">${r.agent}</td><td>${r.vega}</td><td>${r.avg}</td>
       <td>${r.best} <span class="note">(${r.best_alt} km)</span></td></tr>`).join("") +
@@ -335,7 +338,7 @@ async function init() {
   $("speed").value = String(state.speed);
   $("scrub").oninput = (e) => { state.T = e.target.value / 1000 * totalH(); state.logCount = -1; };
   const q = +new URLSearchParams(location.search).get("world");
-  await load(state.index.worlds.some((w) => w.seed === q) ? q : 3);
+  await load(state.index.worlds.some((w) => w.seed === q) ? q : 7);   // world 7: the clearest agent win; the table shows all 20
   requestAnimationFrame(frame);
 }
 init();

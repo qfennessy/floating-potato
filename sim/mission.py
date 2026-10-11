@@ -15,7 +15,8 @@ import numpy as np
 import commander as cmd
 from events import VOLCANOES, detectable, generate
 from planner import eta_hours, search_planner
-from venus import STEP_S, TARGETS, State, drifter, gc_km, step
+import venus
+from venus import KM_PER_DEG, STEP_S, TARGETS, State, drifter, gc_km, step, wind, world_start, world_weather
 
 ROOT = Path(__file__).resolve().parent.parent
 RUNS = ROOT / "runs"
@@ -25,35 +26,65 @@ CHASE_MAX_H = 6.0   # while holding a band, only consider chases this close
 STRATEGY_H = 24.0   # how often the strategist re-picks where to hang out and which sites to pursue
 
 
-def hold_latitude(lat_target, band=HOLD_BAND):
-    """Keep latitude near lat_target (signed). High altitude drifts poleward and low drifts
-    toward the equator, so which one moves you north depends on the hemisphere you're in.
-    Mid-corridor (56 km) has no north-south drift."""
-    def policy(st):
-        if st.lat < lat_target - band:                     # need to go north
-            goal = 61.5 if st.lat >= 0 else 50.5
-        elif st.lat > lat_target + band:                   # need to go south
-            goal = 50.5 if st.lat > 0 else 61.5
+class LaneHolder:
+    """Holds a latitude by learning, as it flies, which altitudes push it north or south.
+
+    The balloon only knows the forecast before launch, and each world's real weather differs
+    (the altitude where the north-south drift flips moves between 52 and 60 km). So for each
+    altitude level it keeps a running average of the push it actually felt, starting from the
+    forecast as a guess, and flies to whichever level pushes it toward its lane."""
+    LEVELS = np.arange(50.5, 62.0, 1.5)
+    PRIOR_WEIGHT = 2.0          # the forecast counts as this many observations
+
+    def __init__(self, band=HOLD_BAND):
+        self.band = band
+        self.prior = np.array([wind(45.0, a, 6.0)[1] for a in self.LEVELS])   # push at sin(2 lat) = 1
+        self.sum = np.zeros(len(self.LEVELS))
+        self.n = np.zeros(len(self.LEVELS))
+
+    def estimate(self):
+        return (self.prior * self.PRIOR_WEIGHT + self.sum) / (self.PRIOR_WEIGHT + self.n)
+
+    def observe(self, before, after):
+        """Learn from one step: how fast did we really move north, at this altitude?"""
+        s2 = np.sin(2 * np.radians(before.lat))
+        k = int(np.argmin(np.abs(self.LEVELS - after.alt)))
+        if abs(s2) < 0.2 or abs(self.LEVELS[k] - after.alt) > 0.3 or abs(after.alt - before.alt) > 0:
+            return                                          # near the equator, or still climbing
+        v = (after.lat - before.lat) * KM_PER_DEG * 1000 / STEP_S
+        self.sum[k] += v / s2
+        self.n[k] += 1
+
+    def act(self, st, lat_target):
+        est = self.estimate() * np.sign(np.sin(2 * np.radians(st.lat)) or 1.0)   # push north per level
+        need = lat_target - st.lat
+        if abs(need) <= self.band:
+            goal = self.LEVELS[int(np.argmin(np.abs(est)))]                      # stay: least push
         else:
-            goal = 56.0
+            goal = self.LEVELS[int(np.argmax(est * np.sign(need)))]              # go: most push our way
         return int(np.sign(round(goal - st.alt, 3)))
-    return policy
 
 
-def fly(name, days=10.0, start=(15.0, 300.0), seed=1, commander=None, fixed_alt=None, strategist=None,
-        hold_lat=None):
+def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, strategist=None,
+        hold_lat=None, varied=True):
     """commander=None with fixed_alt flies a drifter; sensors still record events it passes.
 
     strategist(st, view) -> {"focus": [volcano names], "fixed": [fixed site names], "reason": str}
     runs every STRATEGY_H hours: focus sets where the planner loiters, fixed which sites it pursues.
     It may also return "hold_lat": the latitude to hold between chases.
 
-    hold_lat: when set, the balloon holds that latitude band and the planner only flies chases."""
+    hold_lat: when set, the balloon holds that latitude band and the planner only flies chases.
+    varied: each world gets its own launch point and real weather (from its seed); False flies the
+    original fixed world (launch 15 N 300 E, weather = forecast)."""
+    venus.WX = world_weather(seed) if varied else dict(venus.FORECAST)
+    if start is None:
+        start = world_start(seed) if varied else (15.0, 300.0)
     events = generate(days, seed)
     st = State(start[0], start[1], fixed_alt or 56.0)
     planner = None if fixed_alt else search_planner()
     policy = drifter(fixed_alt) if fixed_alt else planner
     known, chasing, ignored = {}, None, set()
+    holder = LaneHolder()
     plan = {"focus": list(VOLCANOES), "fixed": list(TARGETS), "next_h": 0.0, "hold": hold_lat, "lane": None}
     log, track = [], [(st.lat, st.lon, st.alt, st.hours)]
 
@@ -125,10 +156,13 @@ def fly(name, days=10.0, start=(15.0, 300.0), seed=1, commander=None, fixed_alt=
         active = {**TARGETS, **{e.id: (e.lat, e.lon) for e in events if e.t_h <= st.hours < e.ends_h}}
         before = set(st.reached)
         if planner and plan["hold"] is not None and not chasing:
-            action = hold_latitude(plan["hold"])(st)          # cruise in the chosen band
+            action = holder.act(st, plan["hold"])            # cruise in the chosen band
         else:
             action = policy(st)
+        prev = st
         st = step(st, action, active)
+        if planner:
+            holder.observe(prev, st)
         for got in set(st.reached) - before:
             what = got if got in TARGETS else next(e.label() for e in events if e.id == got)
             say("reached", f"reached {what}", target=got)

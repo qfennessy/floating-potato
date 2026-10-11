@@ -24,22 +24,43 @@ TARGETS = {
 }
 CAPTURE_KM = 350.0
 
+# Weather. FORECAST is what everyone knows before launch. Each world's TRUE weather differs
+# (world_weather): the altitude where north-south drift flips, wind speed, the strength of the
+# north-south push, and the timing of the daily tide. WX holds the true weather of the world
+# being flown; step() uses it, while planners that call advance() without wx use the forecast.
+FORECAST = {"flip_km": 56.0, "zonal": 1.0, "hadley": 6.0, "tide_phase": 0.0}
+WX = dict(FORECAST)
 
-def wind(lat, alt_km, local_time_h):
+
+def world_weather(seed):
+    rng = np.random.default_rng(10_000 + seed)
+    return {"flip_km": float(rng.uniform(52, 60)), "zonal": float(rng.uniform(0.85, 1.15)),
+            "hadley": float(rng.uniform(4, 8)), "tide_phase": float(rng.uniform(0, 24))}
+
+
+def world_start(seed):
+    """Launch point for a world: anywhere between 30 S and 30 N."""
+    rng = np.random.default_rng(20_000 + seed)
+    return float(rng.uniform(-30, 30)), float(rng.uniform(0, 360))
+
+
+def wind(lat, alt_km, local_time_h, wx=FORECAST):
     """Return (u, v) in m/s. u < 0 is westward; v > 0 is northward.
 
-    Zonal: 60 m/s at the corridor floor rising to 100 m/s at the top,
+    Zonal: 60 m/s at the corridor floor rising to 100 m/s at the top (times wx zonal),
     falling off with cos(latitude) like near-solid-body superrotation.
-    Meridional: a Hadley-style cell, poleward near the cloud top and
-    equatorward near the base, plus a small thermal-tide term that lets
-    a balloon cross the equator if it times its altitude to local time.
+    Meridional: a Hadley-style cell, poleward above the flip altitude and equatorward
+    below it, plus a small thermal-tide term that lets a balloon cross the equator if
+    it times its altitude to local time.
     """
     s = (alt_km - CORRIDOR_KM[0]) / (CORRIDOR_KM[1] - CORRIDOR_KM[0])   # 0 at floor, 1 at top
+    d = np.clip((alt_km - wx["flip_km"]) / 6.0, -1.25, 1.25)           # <0 below the flip, >0 above
+    lt = local_time_h + wx["tide_phase"]
     lat_r = np.radians(lat)
-    u = -(60.0 + 40.0 * s) * np.cos(lat_r)
-    u += 4.0 * np.cos(2 * np.pi * local_time_h / 24.0)                   # diurnal tide on speed
-    hadley = 6.0 * (2 * s - 1) * np.sin(2 * lat_r)                       # -6..+6 m/s
-    tide_v = 2.0 * np.sin(2 * np.pi * local_time_h / 24.0) * (2 * s - 1)
+    u = -(60.0 + 40.0 * s) * wx["zonal"] * np.cos(lat_r)
+    u += 4.0 * np.cos(2 * np.pi * lt / 24.0)                             # diurnal tide on speed
+    hadley = wx["hadley"] * d * np.sin(2 * lat_r)
+    tide_v = 2.0 * np.sin(2 * np.pi * lt / 24.0) * d
     return u, hadley + tide_v
 
 
@@ -57,10 +78,11 @@ def local_time(lon, hours):
     return (12.0 + (lon - subsolar) / 15.0) % 24
 
 
-def advance(lat, lon, alt, hours, action):
-    """One 15-minute step for scalars or numpy arrays. Returns (lat, lon, alt, dlon)."""
+def advance(lat, lon, alt, hours, action, wx=FORECAST):
+    """One 15-minute step for scalars or numpy arrays. Returns (lat, lon, alt, dlon).
+    Defaults to the forecast weather: that is all a planner knows."""
     alt = np.clip(alt + action * ALT_RATE_KM, *CORRIDOR_KM)
-    u, v = wind(lat, alt, local_time(lon, hours))
+    u, v = wind(lat, alt, local_time(lon, hours), wx)
     dlat = v * STEP_S / 1000 / KM_PER_DEG
     dlon = u * STEP_S / 1000 / (KM_PER_DEG * np.maximum(np.cos(np.radians(lat)), 0.05))
     return np.clip(lat + dlat, -85, 85), (lon + dlon) % 360, alt, dlon
@@ -87,7 +109,7 @@ class State:
 def step(st: State, action: int, targets=None) -> State:
     """Advance one 15-minute step. action: -1 descend, 0 hold, +1 ascend.
     `targets` maps name -> (lat, lon, ...); defaults to the fixed science sites."""
-    lat, lon, alt, dlon = advance(st.lat, st.lon, st.alt, st.hours, action)
+    lat, lon, alt, dlon = advance(st.lat, st.lon, st.alt, st.hours, action, WX)    # the real weather
     new = State(float(lat), float(lon), float(alt), st.hours + STEP_S / 3600,
                 st.lon_flown - float(dlon), list(st.reached))
     for name, t in (TARGETS if targets is None else targets).items():

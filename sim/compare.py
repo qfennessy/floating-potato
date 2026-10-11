@@ -1,7 +1,9 @@
 """Fair scoreboard over many worlds: the agent vs. EVERY fixed-altitude drifter.
 
 Uses the rule strategist and rule commander (no API calls), so it is quick and repeatable.
-A fixed altitude has to be chosen before launch; "best in hindsight" is shown only for context.
+Each world has its own launch point and weather. A fixed altitude has to be chosen before launch,
+so the fair rival is the best single altitude across all worlds; "best per world in hindsight" is
+shown only for context.
 
     uv run --with numpy --with matplotlib python sim/compare.py --worlds 20
 """
@@ -29,6 +31,9 @@ def main():
         print(f"  fixed {alt:4.1f} km: {col.sum():4.0f}   agent ahead in {(agent > col).sum()}, "
               f"tied {(agent == col).sum()}, behind {(agent < col).sum()}")
     print(f"average fixed altitude: {fixed.sum(0).mean():.0f}")
+    best = int(np.argmax(fixed.sum(0)))
+    print(f"best single fixed altitude for all worlds ({ALTS[best]:.1f} km): {fixed.sum(0)[best]:.0f}  "
+          f"<- the fair rival: one altitude, picked before launch")
     print(f"best fixed altitude per world, picked in hindsight: {fixed.max(1).sum():.0f}")
 
 

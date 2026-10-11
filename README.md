@@ -8,6 +8,8 @@ Created 2026-10-07 · Last edited 2026-10-11
 
 Live demo: https://venus-balloon-navigator.vercel.app
 
+![Venus Balloon Navigator: balloons riding the wind layers around Venus, with the wind panel showing each layer's speed and north-south push](docs/screenshot.jpg)
+
 ## About
 
 **What it is.** A balloon on Venus can't steer, but the wind changes with height: higher layers blow west faster and push toward the poles; lower layers are slower and push toward the equator. So picking an altitude picks your speed and your north-south drift. This project turns that into a race between AI pilots, simple rules, balloons that never change height, and a human player.

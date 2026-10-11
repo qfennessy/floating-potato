@@ -28,6 +28,7 @@ header { display: flex; gap: 24px; justify-content: space-between; align-items: 
 .score .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; min-width: 120px; }
 .score .card b { display: block; font: 600 28px/1.1 "JetBrains Mono", monospace; }
 .score .card span { font-size: 12px; color: var(--muted); }
+.score .card em { display: block; font: normal 11px Inter, sans-serif; color: var(--you); }
 .score .you b { color: var(--you); }
 .score .agent b { color: var(--agent); }
 .score .vega b { color: var(--vega); }

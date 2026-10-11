@@ -183,19 +183,24 @@ class Globe {
     });
     this.events = [];
     this.syncEvents();
-    // Mission control markers: the priority site and the volcano alert, shown while they apply.
-    this.markers = (world.messages || []).filter((m) => m.type === "priority" || m.type === "tip").map((m) => {
-      const [lat, lon] = m.type === "priority" ? [m.lat, m.lon] : world.volcanoes[m.site];
-      const g = ring(lat, lon, world.capture_km * 1.6, 1.008);
+    this.markers = [];
+    // Sites get name labels only if they are among the 12 biggest, or once a balloon reaches them.
+    this.big = new Set(Object.entries(world.target_size || {}).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k]) => k));
+  }
+
+  // Your mission control requests (priority site, volcano alert), shown while they apply.
+  setMarkers(msgs) {
+    for (const mk of this.markers || []) { this.dynamic.remove(mk.ring); this.dynamic.remove(mk.label); }
+    this.markers = msgs.filter((m) => m.site && (m.type === "priority" || m.type === "tip")).map((m) => {
+      const [lat, lon] = m.type === "priority" ? [m.lat, m.lon] : this.world.volcanoes[m.site];
+      const g = ring(lat, lon, this.world.capture_km * 1.6, 1.008);
       g.material.color.set(m.type === "priority" ? 0xe879f9 : 0xfb923c);
-      const l = label(m.type === "priority" ? `PRIORITY · ${m.site} (+10)` : `ALERT · ${m.site}`, "marker");
+      const l = label(m.type === "priority" ? `YOUR PRIORITY · ${m.site} (+10)` : `YOUR ALERT · ${m.site}`, "marker");
       l.position.copy(toXYZ(lat, lon, 1.03));
       g.visible = l.visible = false;
       this.dynamic.add(g); this.dynamic.add(l);
-      return { m, ring: g, label: l, until: m.type === "priority" ? m.until_h : m.erupt_h + 72 };
+      return { m, ring: g, label: l, until: m.type === "priority" ? m.until_h : m.erupt_h + 120 };
     });
-    // Sites get name labels only if they are among the 12 biggest, or once a balloon reaches them.
-    this.big = new Set(Object.entries(world.target_size || {}).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k]) => k));
   }
 
   // Events can be added while you fly past the precomputed days; give each new one a ring and label.

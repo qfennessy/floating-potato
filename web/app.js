@@ -106,7 +106,21 @@ function advance([lat, lon, alt], hours, aim) {
 
 // Mission control rules (port of sim/missionctl.py points_for / bonus_targets).
 const msgs = () => state.world.messages || [];
-const bonusLive = (h) => msgs().filter((m) => m.type === "priority" && m.t_h <= h && h < m.until_h);
+// Priority and alert requests are personal: picked within REACH_LAT of YOUR latitude when they arrive.
+const REACH_LAT = 6;
+const bonusLive = (h) => (state.world.runs.you?.msgs || []).filter((m) => m.type === "priority" && m.t_h <= h && h < m.until_h);
+function personalize(m, lat, got) {
+  const rand = rng32(state.world.seed * 31 + Number(m.id.slice(1)));
+  const near = (pts, skip) => Object.keys(pts).filter((k) => !skip.has(k) && Math.abs(pts[k][0] - lat) <= REACH_LAT).sort();
+  const nearest = (pts) => Object.keys(pts).sort((a, b) => Math.abs(pts[a][0] - lat) - Math.abs(pts[b][0] - lat))[0];
+  if (m.type === "priority") {
+    const pool = near(state.world.targets, got), site = pool.length ? pool[Math.floor(rand() * pool.length)] : nearest(state.world.targets);
+    const [la, lo] = state.world.targets[site];
+    return { ...m, site, lat: la, lon: lo, text: `Priority request: pass over ${site} before day ${Math.round(m.until_h / 24)} for a 10-point bonus.` };
+  }
+  const pool = near(state.world.volcanoes, new Set()), v = pool.length ? pool[Math.floor(rand() * pool.length)] : nearest(state.world.volcanoes);
+  return { ...m, site: v, text: `Seismic alert: ${v} is likely to erupt around day ${Math.round(m.erupt_h / 24)}. A major eruption is worth 5 points.` };
+}
 function pointsFor(target, h, lat) {
   let base;
   if (target.startsWith("BONUS:")) base = 10;
@@ -123,7 +137,7 @@ function pointsFor(target, h, lat) {
 // Your flight is stored like a replayed run (track + log), grown or rewound to match the clock.
 function newYou() {
   const [lat, lon] = state.world.start;
-  return { label: "You", track: [[lat, lon, 56]], log: [], aims: [] };
+  return { label: "You", track: [[lat, lon, 56]], log: [], aims: [], msgs: [] };
 }
 function syncYou() {
   const you = state.world.runs.you, want = idxYou(state.T);
@@ -132,9 +146,23 @@ function syncYou() {
     you.track.length = want + 1;
     you.aims.length = want;
     you.log = you.log.filter((l) => l.t_h <= want * state.world.step_h);
+    you.msgs = you.msgs.filter((m) => m.t_h <= want * state.world.step_h);
   }
   while (you.track.length - 1 < want) {
     const k = you.track.length - 1, hours = k * state.world.step_h;
+    for (const m of msgs())                                    // your personal requests arrive
+      if ((m.type === "priority" || m.type === "tip") && m.t_h <= hours && !you.msgs.some((x) => x.id === m.id)) {
+        const pm = personalize(m, you.track[k][0], new Set(you.log.map((l) => l.target)));
+        you.msgs.push(pm);
+        you.log.push({ t_h: m.t_h, kind: "message", text: pm.text });
+        if (pm.type === "tip") {                                  // your alert's eruption (reused after a rewind)
+          const [la, lo] = state.world.volcanoes[pm.site];
+          const ev = { id: "YOU_TIP", kind: "major", t_h: pm.erupt_h, lat: la, lon: lo, site: pm.site,
+                       value: 5, ends_h: pm.erupt_h + 120, sensor: "", text: "major eruption" };
+          const old = state.world.events.find((e) => e.id === "YOU_TIP");
+          old ? Object.assign(old, ev) : state.world.events.push(ev);
+        }
+      }
     const active = state.world.events.filter((e) => e.t_h <= hours && hours < e.ends_h);
     const next = advance(you.track[k], hours, state.aim);
     you.track.push(next);
@@ -289,16 +317,20 @@ function drawScore() {
   const cards = [["you", "You"], ["agent", "Gemini ER 2"], ["flash", "Gemini 3.8 Flash"], ["rules", "Rulebook"],
                  ["vega", "Vega-style drifter"], ["best", "Best single fixed altitude"]].filter(([r]) => state.world.runs[r]);
   $("score").innerHTML = cards.map(([r, name]) => {
-    const pts = pointsBy(r, state.T);
-    return `<div class="card ${r}"><b>${pts}</b><span>${name} points</span></div>`;
+    // Everyone is scored to the same finish line: the end of the AI flights (day 30). You can keep
+    // flying after that, but those points are shown separately and don't count in the race.
+    const pts = pointsBy(r, Math.min(state.T, totalH()));
+    const extra = r === "you" && state.T > totalH() ? pointsBy("you", state.T) - pts : 0;
+    const note = r === "you" && state.T > totalH() ? `<em>final at day ${state.world.days}${extra ? ` · +${extra} after, not counted` : ""}</em>` : "";
+    return `<div class="card ${r}"><b>${pts}</b><span>${name} points</span>${note}</div>`;
   }).join("");
 }
 
 function drawLog() {
   const T = state.T, w = state.world;
-  const entries = [...ais().flatMap((r) => w.runs[r].log.filter((l) => l.kind !== "message").map((l) => ({ ...l, run: r }))),
+  const entries = [...ais().flatMap((r) => w.runs[r].log.filter((l) => l.kind !== "message" || l.site).map((l) => ({ ...l, run: r }))),
                    ...w.runs.you.log.map((l) => ({ ...l, run: "you" })),
-                   ...msgs().map((m) => ({ t_h: m.t_h, kind: "message", text: m.text, run: "mc" }))]
+                   ...msgs().filter((m) => m.text).map((m) => ({ t_h: m.t_h, kind: "message", text: m.text, run: "mc" }))]
     .filter((l) => l.t_h <= T).sort((a, b) => a.t_h - b.t_h);
   if (entries.length === state.logCount) return;
   state.logCount = entries.length;
@@ -391,6 +423,8 @@ function frame(now) {
     }
     state.maxT = Math.max(state.maxT, state.T, totalH());
     syncYou(); drawPilot(); sounds(dt);
+    const ym = state.world.runs.you.msgs;
+    if (globe() && ym.length !== state.markerCount) { state.markerCount = ym.length; globe().setMarkers(ym); }
     $("scrub").value = Math.round(state.T / state.maxT * 1000);
     $("clock").textContent = `day ${hoursToDay(state.T)}` + (state.T > totalH() ? ` · AI flights ended day ${state.world.days}` : "");
     if (flatShown()) drawMap();
@@ -410,7 +444,7 @@ function setPlaying(p) {
 
 async function load(seed) {
   state.world = await (await fetch(`data/world${seed}.json`)).json();
-  state.T = 0; state.maxT = 0; state.logCount = -1; audio.lastT = 0;
+  state.T = 0; state.maxT = 0; state.logCount = -1; audio.lastT = 0; state.markerCount = -1;
   state.gen = { t: state.world.days * 24, n: 0, rand: rng32(state.world.seed * 7919 + 17) };
   state.big = new Set(Object.entries(state.world.target_size || {}).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k]) => k));
   state.world.runs.you = newYou();

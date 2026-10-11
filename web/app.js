@@ -468,7 +468,7 @@ function drawTable() {
     if (val == null) return "<td>–</td>";
     const best = Math.max(...RUNCOLS.map((k) => r[k] ?? -1));
     const win = val === best, star = val >= starAt;
-    const num = win ? `<span class="pill" style="background:${COLOR[run]}">${val}</span>` : `${val}`;
+    const num = win ? `<span class="winner" style="color:${COLOR[run]};border-color:${COLOR[run]}">${val}</span>` : `${val}`;
     return `<td class="score-cell" data-seed="${r.seed}" data-run="${run}" title="Watch this run">${star ? '<span class="star">★</span>' : ""}${num}${extra}${gauge(r, run)}</td>`;
   };
   $("table").innerHTML =
@@ -824,6 +824,7 @@ async function init() {
   $("scrub").oninput = (e) => { state.T = e.target.value / 1000 * endH(); state.logCount = -1; };
   const q = +new URLSearchParams(location.search).get("world");
   await load(state.index.worlds.some((w) => w.seed === q) ? q : 7);   // world 7: the clearest agent win; the table shows all 20
+  if (location.hash === "#fly") select("you");          // from the landing page's "Fly it yourself"
   requestAnimationFrame(frame);
 }
 init();

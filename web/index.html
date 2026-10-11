@@ -4,106 +4,132 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Venus Balloon Navigator</title>
-  <meta name="description" content="An AI flies a balloon through the clouds of Venus by choosing its altitude, and chases eruptions its sensors pick up.">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
-  <link rel="stylesheet" href="style.css?v=202610111740">
-  <script type="importmap">
-    { "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+  <meta name="description" content="AI pilots, a simple rulebook and you race balloons around Venus, steering only by choosing which altitude's wind to ride.">
+  <script>
+    // Old links like /?world=7 went straight to the simulation; keep them working.
+    if (location.search.includes("world=")) location.replace("sim.html" + location.search);
   </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap">
+  <link rel="stylesheet" href="landing.css?v=202610111742">
 </head>
 <body>
-  <section class="hero">
-    <div id="globe" class="globe"></div>
-    <div class="mapwrap" hidden><canvas id="map"></canvas></div>
-
-    <div class="hud top">
-      <div class="brand">
-        <h1>Venus Balloon Navigator</h1>
-        <p class="lede">Balloons can't steer, but they can pick their wind. Click a balloon's score to follow it.</p>
+  <header class="hero">
+    <div class="hero-text">
+      <p class="kicker">Sundai Club Hack 144 · Autonomous Spacecraft</p>
+      <h1>Venus Balloon Navigator</h1>
+      <p class="lede">AI pilots, a simple rulebook and you race balloons around Venus, steering only by choosing which altitude's wind to ride.</p>
+      <div class="cta">
+        <a class="btn primary" href="sim.html">Watch the race</a>
+        <a class="btn" href="sim.html?world=7#fly">Fly it yourself</a>
       </div>
-      <div class="score" id="score"></div>
     </div>
-
-    <div id="windpanel" class="windpanel" aria-label="Wind at each altitude where the selected balloon is"></div>
-
-    <div class="hud bottom">
-      <p id="fact" class="fact" aria-live="polite"></p>
-      <p id="decision" class="decision"></p>
-      <div class="pilot">
-        <b>Fly it yourself</b>
-        <button id="down" aria-label="Lower your target altitude">▼</button>
-        <input id="aim" type="range" min="44" max="68" step="0.5" value="56" aria-label="Your target altitude (below 50 and above 62 km are risky)">
-        <button id="up" aria-label="Raise your target altitude">▲</button>
-        <span id="aimval" class="mono">56.0 km</span>
-        <span id="pilotread" class="note"></span>
-      </div>
-      <div class="controls">
-        <button id="play" aria-label="Play or pause">Pause</button>
-        <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Mission time">
-        <span id="clock" class="mono">day 0.0</span>
-        <label>Speed
-          <select id="speed">
-            <option value="2">slow</option>
-            <option value="5" selected>normal</option>
-            <option value="12">fast</option>
-          </select>
-        </label>
-        <label>World <select id="world"></select></label>
-        <button id="director" aria-label="Pause and frame the shot before an interception" class="on">Director on</button>
-        <button id="facts" aria-label="Show short Venus facts during the flight" class="on">Facts on</button>
-        <button id="view" aria-label="Switch between globe and flat map">Flat map</button>
-        <button id="follow" aria-label="Camera follows the selected balloon" class="on">Following</button>
-        <button id="sound" aria-label="Turn volcano sounds on or off" class="on">Sound on</button>
-      </div>
-      <p class="fineprint">Synthetic wind simulation · altitude exaggerated about 30×</p>
-    </div>
-  </section>
+    <a class="hero-shot" href="sim.html"><img src="hero.jpg" alt="The simulation: balloons riding the wind layers around Venus, with a wind panel showing each layer's speed and north-south push"></a>
+  </header>
 
   <main>
-    <section class="stage">
-      <div class="legend">
-        <span data-run="you"><i class="sw you"></i>You</span>
-        <span data-run="hybrid"><i class="sw hybrid"></i>Rulebook + Gemini</span>
-        <span data-run="agent"><i class="sw agent"></i>Gemini Robotics-ER 2</span>
-        <span data-run="flash"><i class="sw flash"></i>Gemini 3.8 Flash</span>
-        <span data-run="rules"><i class="sw rules"></i>Rulebook</span>
-        <span data-run="vega"><i class="sw vega"></i>Drifter at 54 km (Vega 1985)</span>
-        <span data-run="best"><i class="sw best"></i>Best single fixed altitude for all worlds</span>
+    <section class="block">
+      <h2>Balloons can't steer. But they can pick their wind.</h2>
+      <div class="split">
+        <div>
+          <p>Venus's surface is about 465°C, and landers die within hours. But 50 to 62 km up, inside the clouds, the air is close to Earth's temperature and pressure. Balloons can live there: the Soviet-French Vega balloons floated at 54 km for two days in 1985.</p>
+          <p>The whole cloud layer races around the planet, once every 4 or 5 days. A balloon can't push sideways, but it can go up or down, and <b>each height has a different wind</b>:</p>
+          <ul class="ticks">
+            <li><b>Higher</b> is faster, and drifts toward the poles.</li>
+            <li><b>Lower</b> is slower, and drifts toward the equator.</li>
+            <li>Somewhere in the middle, the north-south drift flips.</li>
+          </ul>
+          <p>So choosing a height chooses both your speed and your north-south drift. That's the only steering there is.</p>
+        </div>
+        <figure class="layers" aria-label="Diagram: wind layers by altitude">
+          <svg viewBox="0 0 360 260" role="img">
+            <title>Wind by altitude: faster and poleward up high, slower and equatorward down low</title>
+            <defs>
+              <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#ffd27a"/></marker>
+              <marker id="ahn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#7cc4ff"/></marker>
+              <marker id="ahs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#fb923c"/></marker>
+            </defs>
+            <rect x="0" y="0" width="360" height="50" fill="rgba(248,113,113,0.10)"/>
+            <rect x="0" y="210" width="360" height="50" fill="rgba(248,113,113,0.10)"/>
+            <text x="8" y="18" class="lbl risky">above 62 km: fast jet, acid wears the balloon</text>
+            <text x="8" y="250" class="lbl risky">below 50 km: slow and hot</text>
+            <g class="row"><text x="8" y="80" class="lbl">62 km</text><line x1="300" y1="76" x2="70" y2="76" marker-end="url(#ah)"/><line x1="320" y1="84" x2="320" y2="62" class="n" marker-end="url(#ahn)"/><text x="215" y="70" class="note">100 m/s west</text></g>
+            <g class="row"><text x="8" y="130" class="lbl">56 km</text><line x1="300" y1="126" x2="125" y2="126" marker-end="url(#ah)"/><text x="215" y="120" class="note">75 m/s, no drift</text></g>
+            <g class="row"><text x="8" y="180" class="lbl">50 km</text><line x1="300" y1="176" x2="180" y2="176" marker-end="url(#ah)"/><line x1="320" y1="168" x2="320" y2="190" class="s" marker-end="url(#ahs)"/><text x="215" y="170" class="note">60 m/s west</text></g>
+            <text x="300" y="232" class="note">↑ north · ↓ south</text>
+          </svg>
+          <figcaption>Pick a layer, pick your speed and your drift. (Northern hemisphere shown.)</figcaption>
+        </figure>
       </div>
-      <p class="note">On the globe: amber particles are the wind at each altitude layer (the selected balloon's layer glows); a crimson pulse marks an eruption, and its halo shrinks as the sampling window closes; the dashed line is where the selected balloon goes in the next day at its current altitude; glowing points on the surface are captured science. Keys: ↑ ↓ change your altitude, space pauses.</p>
-      <h2>Altitude</h2>
-      <canvas id="strip"></canvas>
-      <p class="note">Dots on the lines and ticks in the rows below mark when each balloon scored (bigger = more points; faint or hollow = didn't count because of a relay outage). The dashed line is the day-30 finish. Green band: the 50–62 km safe corridor.</p>
     </section>
 
-    <aside>
-      <h2>Commander log</h2>
-      <p class="note" id="who"></p>
-      <ol id="log" class="log"></ol>
-    </aside>
+    <section class="block">
+      <h2>The mission: 30 days, as many points as possible</h2>
+      <div class="cards">
+        <div class="card"><h3>60 named sites</h3><p>Real features from the USGS/IAU gazetteer, like Maat Mons and Beta Regio. 1 point each, the first time you pass within 350 km.</p></div>
+        <div class="card"><h3>Eruptions and plumes</h3><p>70 real volcanoes erupt now and then, and they erupt in spells. Catch an eruption (2), a gas plume (3), or lightning (1) before it fades.</p></div>
+        <div class="card"><h3>Mission control</h3><p>Four plain-text messages per flight: plumes worth triple, a bonus site, a relay outage, a volcano alert. Only pilots that read them can act on them.</p></div>
+        <div class="card"><h3>Risky science</h3><p>Cloud-top samples above 63 km and deep-air samples below 48 km, 3 points each. Worth it only if you can survive getting them.</p></div>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>Risk and resources</h2>
+      <div class="cards three">
+        <div class="card"><h3>Ballast and gas</h3><p>Climbing drops ballast, sinking vents gas: 45 km of each for the whole flight. Run out and that direction is gone.</p></div>
+        <div class="card"><h3>Wear and loss</h3><p>Outside 50–62 km, acid above and heat below wear out the envelope, and every hour there risks losing the balloon.</p></div>
+        <div class="card"><h3>The finish line</h3><p>Scoring stops at day 30. Surviving past it is worth nothing, so the smart move is to take risks late, not early, and finish with nothing left.</p></div>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>The pilots</h2>
+      <ul class="pilots">
+        <li><i style="background:#ffb347"></i><b>Gemini Robotics-ER 2</b> looks at a map every 2 days and picks a lane, roams, sprints into the risky layers, or heads for a place, and explains why in one sentence.</li>
+        <li><i style="background:#34d399"></i><b>Gemini 3.8 Flash</b> gets exactly the same map, prompt and tools.</li>
+        <li><i style="background:#a78bfa"></i><b>The rulebook</b> is plain code: hold the busiest lane until it runs dry, then roam, and sprint in the last 6 days.</li>
+        <li><i style="background:#facc15"></i><b>Rulebook + Gemini</b> lets the rules fly and asks Gemini only when something comes up: a message, an open request, a burst of eruptions.</li>
+        <li><i style="background:#c9c9c9"></i><b>Fixed balloons</b> never change height, like Vega in 1985. The best single height across all worlds is the fair rival.</li>
+        <li><i style="background:#f472b6"></i><b>You</b> fly live with a slider, against everyone's saved flights.</li>
+      </ul>
+      <p class="small">Between decisions, the same autopilot flies every pilot's balloon: a search planner that weighs risk against the days left, and a lane holder that learns the real winds. Each world has its own launch point and weather; the pilots only know a forecast.</p>
+    </section>
+
+    <section class="block">
+      <h2>Results: 20 worlds, 30 days each</h2>
+      <div id="results" class="results"><p class="small">Loading…</p></div>
+      <p id="takeaway" class="takeaway">Once risk enters the picture, judgment pays: Gemini ER 2 chose when to dive into the dangerous layers and lost one balloon in 20. The rulebook dives on a fixed schedule and lost five. The rulebook still sweeps the most sites.</p>
+    </section>
+
+    <section class="block">
+      <h2>How to watch</h2>
+      <div class="cards three">
+        <div class="card"><h3>The globe</h3><p>Amber particles are the wind near the selected balloon, blue for northward, orange for southward. Height is exaggerated about 30×. A crimson pulse is an eruption; its halo shrinks as time runs out.</p></div>
+        <div class="card"><h3>The panels</h3><p>The wind panel lists each layer's speed and push. One sentence says what the selected pilot is doing. Score chips drain as balloons wear.</p></div>
+        <div class="card"><h3>The controls</h3><p>Click a score chip to follow a balloon. The Director pauses and frames each eruption catch. Space pauses. ↑ ↓ fly your own balloon.</p></div>
+      </div>
+      <div class="cta center"><a class="btn primary" href="sim.html">Watch the race</a></div>
+    </section>
   </main>
 
-  <section class="summary">
-    <h2>All 20 worlds</h2>
-    <p class="note">Each world has its own launch point, its own weather (the height where north-south drift flips moves between 52 and 60 km), and its own random eruptions. A fixed balloon gets one altitude for every world, picked before launch.</p>
-    <p class="gauge-key">Bars under each score, left at the finish:<i style="background:#4ade80"></i>envelope health<i style="background:#ffb347"></i>ballast (climbing)<i style="background:#7cc4ff"></i>gas (sinking). ✕ marks a lost balloon. Hover for details. A coloured pill marks each world's winner; ★ marks the 5 best runs overall. Click any score to watch that run.</p>
-    <table id="table"></table>
-  </section>
-
-  <section class="summary venusfacts">
-    <h2>Venus facts</h2>
-    <ul id="factlist"></ul>
-  </section>
-
   <footer>
-    <p>Built at <a href="https://www.sundai.club/events/boston/hack-144-autonomous-spacecraft-hack">Sundai Club Hack 144</a>, Oct 11 2026. Synthetic winds, not real Venus data. Maps: NASA / JPL / USGS Magellan radar mosaic and topography. 3D: three.js. Code: <a href="https://github.com/qfennessy/floating-potato">github.com/qfennessy/floating-potato</a>.</p>
+    <p>Synthetic winds shaped to match probe measurements, not real Venus weather data. Surface: NASA / JPL / USGS Magellan topography. Site names: USGS/IAU Gazetteer of Planetary Nomenclature. Built at <a href="https://www.sundai.club/events/boston/hack-144-autonomous-spacecraft-hack">Sundai Club Hack 144</a>, October 11 2026. Code: <a href="https://github.com/qfennessy/floating-potato">github.com/qfennessy/floating-potato</a>.</p>
   </footer>
 
-  <div id="howtip" class="howtip" role="tooltip" hidden></div>
-  <script src="app.js?v=202610111740"></script>
-  <script type="module" src="globe.js?v=202610111740"></script>
+  <script>
+    // Results come straight from the same data the simulation replays.
+    fetch("data/index.json").then((r) => r.json()).then((idx) => {
+      const rows = idx.worlds, tot = (k) => rows.reduce((s, r) => s + (r[k] ?? 0), 0);
+      const lost = (k) => rows.filter((r) => r.end && r.end[k] && r.end[k].lost_h != null).length;
+      const list = [["agent", "Gemini Robotics-ER 2", "#ffb347"], ["hybrid", "Rulebook + Gemini", "#facc15"], ["rules", "Rulebook", "#a78bfa"],
+                    ["flash", "Gemini 3.8 Flash", "#34d399"], ["best", "Best single fixed altitude", "#7cc4ff"], ["vega", "Fixed at 54 km (Vega)", "#c9c9c9"]]
+        .map(([k, name, c]) => ({ k, name, c, pts: tot(k), lost: lost(k) })).sort((a, b) => b.pts - a.pts);
+      const max = list[0].pts;
+      document.getElementById("results").innerHTML = list.map((x) => `
+        <div class="rrow"><span class="rname">${x.name}</span>
+          <span class="rbar"><i style="width:${(x.pts / max * 100).toFixed(1)}%;background:${x.c}"></i></span>
+          <span class="rpts">${x.pts}</span><span class="rlost">${x.lost ? `${x.lost} lost` : ""}</span></div>`).join("");
+    }).catch(() => { document.getElementById("results").innerHTML = ""; });
+  </script>
 </body>
 </html>

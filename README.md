@@ -6,7 +6,7 @@ Created 2026-10-07 · Last edited 2026-10-11
 
 **AI pilots, a simple rulebook and you race balloons around Venus, steering only by choosing which altitude's wind to ride.**
 
-Live demo: https://venus-balloon-navigator.vercel.app
+Live demo: https://venus-balloon-navigator.vercel.app (how it works) · the simulation itself: https://venus-balloon-navigator.vercel.app/sim.html
 
 ![Venus Balloon Navigator: balloons riding the wind layers around Venus, with the wind panel showing each layer's speed and north-south push](docs/screenshot.jpg)
 

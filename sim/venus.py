@@ -51,6 +51,21 @@ def gc_km(lat1, lon1, lat2, lon2):
     return 2 * R_KM * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
 
 
+def local_time(lon, hours):
+    """Local solar time in hours. The sub-solar point drifts slowly westward; it is noon there."""
+    subsolar = (-360.0 * hours / SOLAR_DAY_H) % 360
+    return (12.0 + (lon - subsolar) / 15.0) % 24
+
+
+def advance(lat, lon, alt, hours, action):
+    """One 15-minute step for scalars or numpy arrays. Returns (lat, lon, alt, dlon)."""
+    alt = np.clip(alt + action * ALT_RATE_KM, *CORRIDOR_KM)
+    u, v = wind(lat, alt, local_time(lon, hours))
+    dlat = v * STEP_S / 1000 / KM_PER_DEG
+    dlon = u * STEP_S / 1000 / (KM_PER_DEG * np.maximum(np.cos(np.radians(lat)), 0.05))
+    return np.clip(lat + dlat, -85, 85), (lon + dlon) % 360, alt, dlon
+
+
 @dataclass
 class State:
     lat: float = 15.0
@@ -62,9 +77,7 @@ class State:
 
     @property
     def local_time(self):
-        # Sub-solar longitude drifts slowly; local time 12 h at the sub-solar point.
-        subsolar = (-360.0 * self.hours / SOLAR_DAY_H) % 360
-        return (12.0 + (self.lon - subsolar) / 15.0) % 24
+        return local_time(self.lon, self.hours)
 
     @property
     def laps(self):
@@ -73,13 +86,9 @@ class State:
 
 def step(st: State, action: int) -> State:
     """Advance one 15-minute step. action: -1 descend, 0 hold, +1 ascend."""
-    alt = float(np.clip(st.alt + action * ALT_RATE_KM, *CORRIDOR_KM))
-    u, v = wind(st.lat, alt, st.local_time)
-    dlat = v * STEP_S / 1000 / KM_PER_DEG
-    dlon = u * STEP_S / 1000 / (KM_PER_DEG * max(np.cos(np.radians(st.lat)), 0.05))
-    lat = float(np.clip(st.lat + dlat, -85, 85))
-    new = State(lat, (st.lon + dlon) % 360, alt, st.hours + STEP_S / 3600,
-                st.lon_flown - dlon, list(st.reached))
+    lat, lon, alt, dlon = advance(st.lat, st.lon, st.alt, st.hours, action)
+    new = State(float(lat), float(lon), float(alt), st.hours + STEP_S / 3600,
+                st.lon_flown - float(dlon), list(st.reached))
     for name, (tlat, tlon) in TARGETS.items():
         if name not in new.reached and gc_km(new.lat, new.lon, tlat, tlon) <= CAPTURE_KM:
             new.reached.append(name)

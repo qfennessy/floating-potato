@@ -2,6 +2,8 @@
 
 Built at [Sundai Club](https://www.sundai.club) · [Hack 144 — Autonomous Spacecraft Hack](https://www.sundai.club/events/boston/hack-144-autonomous-spacecraft-hack) · Sun Oct 11, 2026 · MIT
 
+Created 2026-10-07 · Last edited 2026-10-11
+
 ## Pitch
 
 Balloons can't steer, but they can choose their wind. Our agent flies a balloon through the clouds of Venus by changing altitude, reaching science targets that no lander can survive long enough to visit.
@@ -98,7 +100,7 @@ If the 16:00 run/bike tempts you, take it only if the planner already works.
 - [ ] Export the Venus wind table from the Venus Climate Database (or write the synthetic fallback)
 - [ ] Clone the Balloon Learning Environment and confirm it installs
 - [ ] Download a Magellan basemap image and pick the 4–6 target sites
-- [ ] Get a Gemini API key and confirm Gemini Robotics-ER 2 returns a tool call in AI Studio
+- [x] Get a Gemini API key and confirm Gemini Robotics-ER 2 returns a tool call (confirmed via the API on Oct 11: `set_target` called correctly, about 1 s per reply)
 - [ ] Write the noon pitch: two sentences and one sketch of the map
 - [x] Set up a repo and a static hosting target
 

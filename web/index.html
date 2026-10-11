@@ -7,7 +7,7 @@
   <meta name="description" content="An AI flies a balloon through the clouds of Venus by choosing its altitude, and chases eruptions its sensors pick up.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=202610111647">
   <script type="importmap">
     { "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -26,6 +26,8 @@
       </div>
       <div class="score" id="score"></div>
     </div>
+
+    <div id="windpanel" class="windpanel" aria-label="Wind at each altitude where the selected balloon is"></div>
 
     <div class="hud bottom">
       <p id="decision" class="decision"></p>
@@ -93,7 +95,7 @@
   </footer>
 
   <div id="howtip" class="howtip" role="tooltip" hidden></div>
-  <script src="app.js"></script>
-  <script type="module" src="globe.js"></script>
+  <script src="app.js?v=202610111647"></script>
+  <script type="module" src="globe.js?v=202610111647"></script>
 </body>
 </html>

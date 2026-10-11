@@ -551,6 +551,25 @@ function selIndex() {
   const tr = state.world.runs[state.sel].track;
   return state.sel === "you" ? tr.length - 1 : Math.min(idx(state.T), tr.length - 1);
 }
+// Wind panel: what each altitude layer is doing right where the selected balloon is.
+const PANEL_LAYERS = [66, 64, 62, 59, 56, 53, 50, 47];
+function drawWindPanel() {
+  const w = state.world, r = state.sel, [lat, lon, alt] = w.runs[r].track[selIndex()];
+  const lt = localTime(lon, state.T), rows = [];
+  for (const a of PANEL_LAYERS) {
+    const [u, v] = wind(lat, a, lt), here = Math.abs(a - alt) < 1.5;
+    const safe = a >= 50 && a <= 62, ns = Math.abs(v) < 0.3 ? "·" : v > 0 ? "▲" : "▼";
+    rows.push(`<div class="wrow${here ? " here" : ""}${safe ? "" : " risky"}">
+      <span class="alt mono">${a} km</span>
+      <span class="bar"><i style="width:${Math.min(100, -u / 1.15)}%"></i></span>
+      <span class="spd mono">${(-u).toFixed(0)} west</span>
+      <span class="ns ${v > 0.3 ? "n" : v < -0.3 ? "s" : ""}">${ns} ${Math.abs(v).toFixed(1)} ${v > 0.3 ? "north" : v < -0.3 ? "south" : ""}</span></div>`);
+  }
+  const html = `<div class="wtitle">Winds at ${lat.toFixed(0)}°${lat >= 0 ? "N" : "S"} <span class="note">(m/s)</span></div>${rows.join("")}
+    <div class="wnote">▲ pushes north, ▼ pushes south. Pick a layer to pick both your speed and your drift.</div>`;
+  const el = $("windpanel");
+  if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+}
 function drawDecision() {
   const r = state.sel, w = state.world, el = $("decision");
   const [lat, , alt] = w.runs[r].track[selIndex()];
@@ -579,7 +598,7 @@ function director() {
   if (!state.director || r === "you" || !globe()) return;
   if (state.hero) {
     const h = state.hero, now = performance.now();
-    if (h.phase === "frame" && now - h.start > 1800) { h.phase = "slow"; state.speed = 0.5; setPlaying(true); }
+    if (h.phase === "frame" && now - h.start > 1800 && !state.userPaused) { h.phase = "slow"; state.speed = 0.5; setPlaying(true); }
     if (h.phase === "slow" && state.T > h.t + 2.5) { state.speed = h.speed; $("speed").value = String(h.speed); globe().endHero(); state.hero = null; }
     return;
   }
@@ -605,6 +624,7 @@ function frame(now) {
     }
     state.maxT = Math.max(state.maxT, state.T, totalH());
     syncYou(); drawPilot(); sounds(dt); director(); drawDecision();
+    if (state.frameN % 10 === 0) drawWindPanel();
     state.frameN += 1;
     if (globe() && state.frameN % 6 === 0) globe().setForecast(forecastSel());
     if (globe()) globe().setFinished(state.T >= totalH());
@@ -653,12 +673,19 @@ async function init() {
     if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT" && e.target.type !== "range") return;
     if (e.key === "ArrowUp") { setAim(state.aim + 0.5); e.preventDefault(); }
     if (e.key === "ArrowDown") { setAim(state.aim - 0.5); e.preventDefault(); }
-    if (e.key === " ") { $("play").click(); e.preventDefault(); }
+    if (e.key === " " && e.target.tagName !== "BUTTON") { $("play").click(); e.preventDefault(); }
   });
   $("play").onclick = () => {
+    if (state.hero) {                                   // your click wins over a hero shot
+      state.speed = state.hero.speed; $("speed").value = String(state.speed);
+      globe() && globe().endHero(); state.hero = null;
+    }
     if (state.T >= endH()) state.T = 0;
     setPlaying(!state.playing);
+    state.userPaused = !state.playing;
   };
+  // Buttons drop focus after a click, so the space bar only ever means play/pause.
+  document.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => b.blur()));
   $("view").onclick = () => {
     const flat = !flatShown();
     document.querySelector(".mapwrap").hidden = !flat;

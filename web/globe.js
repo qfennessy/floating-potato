@@ -20,7 +20,7 @@ const altR = (alt) => 1.03 + (alt - 44) / 24 * 0.12;
 const SHELL_R = 1.175;                      // the visible cloud deck, above the highest layer
 const LAYERS = [47, 50, 53, 56, 59, 62, 65];
 const BAND = 14;                            // wind highways span this many degrees either side of the balloon
-const PER_LAYER = 650;
+const PER_LAYER = 380;
 const WEDGE = 1.5;                          // radians of cloud cut away, centred on the selected balloon
 
 // lat/lon (deg, lon 0..360 E) -> point on a sphere, matching three's SphereGeometry UVs.
@@ -217,7 +217,8 @@ class Globe {
       const dim = this.finished ? 0.15 : 1;
       L.pts.material.opacity = (near ? 1 : 0.5) * dim;
       L.pts.material.size = near ? 0.022 : 0.013;
-      L.pts.material.color.set(near ? 0xffe08a : 0xff9a3c);
+      const [, vHere] = window.wind(center, L.alt, window.localTime(sel.lon, this.T || 0));
+      L.pts.material.color.set(vHere > 0.3 ? (near ? 0xbfe6ff : 0x7cc4ff) : vHere < -0.3 ? (near ? 0xffd27a : 0xff9a3c) : 0xf2e6d0);
       L.ribbon.material.opacity = (near ? 0.16 : 0.045) * dim;
       // Move each particle with this layer's wind: westward speed, and its north-south drift
       // exaggerated so the bending is visible.
@@ -361,7 +362,7 @@ class Globe {
     for (const r of this.runs) {
       const track = this.world.runs[r].track, j = r === "you" ? track.length - 1 : Math.min(i, track.length - 1);
       this.lines[r].geometry.instanceCount = Math.max(j, 1);
-      const [lat, lon, alt] = track[j];
+      const [lat, lon, alt] = this.interp(track, r === "you" ? j : T / this.world.step_h);
       this.balloons[r].position.copy(toXYZ(lat, lon, altR(alt)));
       const tp = this.tethers[r].geometry.attributes.position;
       const g0 = toXYZ(lat, lon, 1.0);
@@ -394,6 +395,15 @@ class Globe {
     this.updateScience(T);
   }
 
+  // Position between two 15-minute track points, so balloons glide instead of hopping.
+  interp(track, x) {
+    const k = Math.max(0, Math.min(Math.floor(x), track.length - 1)), f = Math.min(Math.max(x - k, 0), 1);
+    const a = track[k], b = track[Math.min(k + 1, track.length - 1)];
+    let dl = b[1] - a[1];
+    if (dl > 180) dl -= 360; else if (dl < -180) dl += 360;
+    return [a[0] + (b[0] - a[0]) * f, mod(a[1] + dl * f, 360), a[2] + (b[2] - a[2]) * f];
+  }
+
   refreshYou() {
     const yt = this.world.runs.you?.track;
     if (!yt || yt.length === this.youLen) return;
@@ -413,6 +423,8 @@ class Globe {
   // Science constellation: a glowing point on the surface for each capture, in the balloon's colour.
   updateScience(T) {
     const w = this.world;
+    if (this.sciT !== undefined && T >= this.sciT && T - this.sciT < 0.5 && !this.finishedChanged) return;
+    this.sciT = T; this.finishedChanged = false;
     const place = (id) => {
       if (id.startsWith("BONUS:")) return w.targets[id.slice(6)];
       if (w.targets[id]) return w.targets[id];
@@ -457,7 +469,7 @@ class Globe {
     this.dynamic.add(this.captureDisc);
   }
 
-  setFinished(on) { this.finished = on; }
+  setFinished(on) { if (on !== this.finished) this.finishedChanged = true; this.finished = on; }
 
   // Hero shot: frame the given points (balloon, volcano) with the layers between them.
   frameHero(points) {
@@ -475,8 +487,7 @@ class Globe {
   selPos() {
     const r = this.sel, tr = this.world?.runs[r]?.track;
     if (!tr) return null;
-    const i = r === "you" ? tr.length - 1 : Math.min(Math.floor((this.T || 0) / this.world.step_h), tr.length - 1);
-    const [lat, lon, alt] = tr[i];
+    const [lat, lon, alt] = this.interp(tr, r === "you" ? tr.length - 1 : (this.T || 0) / this.world.step_h);
     return { lat, lon, alt };
   }
 

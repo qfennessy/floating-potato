@@ -102,8 +102,9 @@ aside { background: var(--panel); border: 1px solid var(--line); border-radius: 
 .log li.missed .k { color: var(--event); }
 @keyframes in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; } }
 
-.summary table { border-collapse: collapse; width: 100%; max-width: 640px; font-size: 14px; }
-.summary th, .summary td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.summary table { border-collapse: collapse; width: auto; font-size: 14px; }
+.summary { overflow-x: auto; }
+.summary th, .summary td { text-align: right; padding: 8px 22px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .summary th:first-child, .summary td:first-child { text-align: left; }
 .summary tr.current { background: var(--panel); }
 .summary td.win { color: var(--good); font-weight: 600; }
@@ -142,3 +143,21 @@ main { margin-top: 16px; }
   .hud .pilot .note { display: none; }
   .decision { font-size: 13px; }
 }
+
+/* wind panel: each layer's westward speed and north/south push at the selected balloon */
+.windpanel { position: absolute; right: 16px; top: 50%; transform: translateY(-55%); z-index: 6; width: 250px;
+  background: rgba(20,17,15,0.78); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 12px; }
+.windpanel .wtitle { font-weight: 600; margin-bottom: 4px; }
+.windpanel .wrow { display: grid; grid-template-columns: 44px 1fr 56px 78px; gap: 6px; align-items: center; padding: 2px 4px; border-radius: 5px; }
+.windpanel .wrow.risky { opacity: 0.7; }
+.windpanel .wrow.risky .alt::after { content: " ⚠"; color: #f87171; }
+.windpanel .wrow.here { background: rgba(255,179,71,0.18); outline: 1px solid rgba(255,179,71,0.6); }
+.windpanel .bar { height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
+.windpanel .bar i { display: block; height: 100%; background: linear-gradient(90deg, #ff9a3c, #ffd27a); }
+.windpanel .spd { color: var(--muted); font-size: 11px; }
+.windpanel .ns { font-weight: 600; font-size: 11px; }
+.windpanel .ns.n { color: #7cc4ff; }
+.windpanel .ns.s { color: #fb923c; }
+.windpanel .wnote { color: var(--muted); font-size: 11px; margin-top: 4px; }
+@media (max-width: 900px) { .windpanel { top: auto; bottom: 210px; transform: none; width: 220px; } }
+@media (max-width: 600px) { .windpanel { display: none; } }

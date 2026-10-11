@@ -161,3 +161,6 @@ main { margin-top: 16px; }
 .windpanel .wnote { color: var(--muted); font-size: 11px; margin-top: 4px; }
 @media (max-width: 900px) { .windpanel { top: auto; bottom: 210px; transform: none; width: 220px; } }
 @media (max-width: 600px) { .windpanel { display: none; } }
+
+.summary tr.total td { border-bottom: 2px solid var(--muted); background: rgba(255,255,255,0.03); }
+.summary tr.total td.lead b { color: var(--good); }

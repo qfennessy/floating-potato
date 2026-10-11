@@ -436,12 +436,14 @@ const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt
 function drawTable() {
   const rows = state.index.worlds;
   const tot = (k) => rows.reduce((s, r) => s + (r[k] ?? 0), 0);
+  const keys = ["hybrid", "agent", "flash", "rules", "vega"], top = Math.max(...keys.map(tot), tot("best"));
+  const cell = (k) => `<td class="${tot(k) === top ? "lead" : ""}"><b>${tot(k)}</b></td>`;
   $("table").innerHTML =
     `<tr><th>World</th><th>Rulebook + Gemini</th><th>Gemini ER 2</th><th>Gemini 3.8 Flash</th><th>Rulebook</th><th>Drifter 54 km</th><th>Average fixed altitude</th><th>Best single fixed altitude</th></tr>` +
+    `<tr class="total"><td><b>Total, all ${rows.length} worlds</b></td>${cell("hybrid")}${cell("agent")}${cell("flash")}${cell("rules")}${cell("vega")}<td><b>${Math.round(tot("avg") * 10) / 10}</b></td>${cell("best")}</tr>` +
     rows.map((r) => `<tr class="${r.seed === state.world.seed ? "current" : ""}" data-seed="${r.seed}" style="cursor:pointer">
       <td>World ${r.seed}</td><td class="${(r.hybrid ?? 0) > (r.rules ?? 0) ? "win" : ""}">${r.hybrid ?? "–"}</td><td class="${r.agent > r.best ? "win" : ""}">${r.agent}</td><td class="${(r.flash ?? 0) > r.best ? "win" : ""}">${r.flash ?? "–"}</td><td>${r.rules ?? "–"}</td>
-      <td>${r.vega}</td><td>${r.avg}</td><td>${r.best} <span class="note">(${r.best_alt} km)</span></td></tr>`).join("") +
-    `<tr><td><b>Total</b></td><td><b>${tot("hybrid")}</b></td><td><b>${tot("agent")}</b></td><td><b>${tot("flash")}</b></td><td><b>${tot("rules")}</b></td><td><b>${tot("vega")}</b></td><td><b>${Math.round(tot("avg") * 10) / 10}</b></td><td><b>${tot("best")}</b></td></tr>`;
+      <td>${r.vega}</td><td>${r.avg}</td><td>${r.best} <span class="note">(${r.best_alt} km)</span></td></tr>`).join("");
   $("table").querySelectorAll("tr[data-seed]").forEach((tr) => tr.onclick = () => load(+tr.dataset.seed));
 }
 

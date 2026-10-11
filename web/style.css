@@ -78,6 +78,9 @@ button:hover { border-color: var(--agent); }
 .sw.agent { background: var(--agent); }
 .sw.flash { background: #34d399; }
 .sw.rules { background: #a78bfa; }
+.sw.hybrid { background: #facc15; }
+.score .hybrid b { color: #facc15; }
+.howtip ul { margin: 6px 0; padding-left: 18px; }
 .score .rules b { color: #a78bfa; }
 .log li.message { background: rgba(244,114,182,0.08); border-left: 3px solid #e879f9; padding-left: 8px; }
 .log li.message .k { color: #e879f9; }

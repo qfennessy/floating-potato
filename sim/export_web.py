@@ -41,6 +41,7 @@ def slim(run, label, who=None):
         "label": label, "points": run["points"], "reached": run["reached"],
         "fixed_alt": run["fixed_alt"], "laps": run["laps"], "log": log,
         "track": [[round(a, 2), round(b, 2), round(c, 2)] for a, b, c, _ in run["track"]],
+        "budget": run.get("budget", [])[::4],          # ballast and gas left, every hour
     }
 
 
@@ -58,6 +59,8 @@ def fly_agent(model_key, seeds, days):
     PARTS.mkdir(parents=True, exist_ok=True)
     if model_key == "rules":
         com, strat, name = cmd.rule_commander, sg.rule_strategist, "rule-based"
+    elif model_key == "hybrid":
+        com, strat, name = cmd.rule_commander, sg.hybrid_strategist(model=MODELS["er"][0]), "Rulebook + Gemini ER 2"
     else:
         model, name = MODELS[model_key]
         com, strat = cmd.gemini_commander(model=model), sg.gemini_strategist(model=model)
@@ -79,7 +82,7 @@ def assemble(days):
     rows = []
     for s in SEEDS:
         parts = {k: json.loads((PARTS / f"world{s}_{k}.json").read_text())
-                 for k in ("er", "flash", "rules") if (PARTS / f"world{s}_{k}.json").exists()}
+                 for k in ("er", "flash", "rules", "hybrid") if (PARTS / f"world{s}_{k}.json").exists()}
         if "er" not in parts:
             continue
         vega = fly(f"vega_s{s}", days, seed=s, fixed_alt=54.0)
@@ -90,6 +93,8 @@ def assemble(days):
             runs["flash"] = parts["flash"]["run"]
         if "rules" in parts:
             runs["rules"] = {**parts["rules"]["run"], "label": "Rulebook"}
+        if "hybrid" in parts:
+            runs["hybrid"] = parts["hybrid"]["run"]
         avg = float(np.mean([fixed[s][a]["points"] for a in map(float, LEVELS)]))
         world = {
             "seed": s, "days": days, "step_h": STEP_S / 3600, "commander": "Gemini Robotics-ER 2 and Gemini 3.8 Flash",
@@ -102,19 +107,19 @@ def assemble(days):
         }
         (WEB / "data" / f"world{s}.json").write_text(json.dumps(world, separators=(",", ":")))
         rows.append({"seed": s, "agent": runs["agent"]["points"], "flash": runs.get("flash", {}).get("points"),
-                     "rules": runs.get("rules", {}).get("points"),
+                     "rules": runs.get("rules", {}).get("points"), "hybrid": runs.get("hybrid", {}).get("points"),
                      "vega": runs["vega"]["points"], "best": runs["best"]["points"], "best_alt": single,
                      "avg": round(avg, 1)})
     (WEB / "data" / "index.json").write_text(json.dumps({"days": days, "worlds": rows}))
     tot = lambda k: sum(r[k] or 0 for r in rows)
-    print(f"{len(rows)} worlds, {days:g} days. ER 2 {tot('agent'):.0f}, Flash {tot('flash'):.0f}, rulebook {tot('rules'):.0f}, "
+    print(f"{len(rows)} worlds, {days:g} days. ER 2 {tot('agent'):.0f}, Flash {tot('flash'):.0f}, rulebook {tot('rules'):.0f}, hybrid {tot('hybrid'):.0f}, "
           f"best single fixed ({single:g} km) {tot('best'):.0f}, Vega {tot('vega'):.0f}, average fixed {tot('avg'):.0f}")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("stage", choices=["fly", "assemble"])
-    ap.add_argument("--model", default="er", choices=["er", "flash", "rules"])
+    ap.add_argument("--model", default="er", choices=["er", "flash", "rules", "hybrid"])
     ap.add_argument("--seeds", type=int, nargs="+", default=SEEDS)
     ap.add_argument("--days", type=float, default=DAYS)
     a = ap.parse_args()

@@ -8,9 +8,10 @@ Every world gets four, at random times (seeded, so every balloon in a world sees
 
 Scoring applies to every balloon equally. Only agents that read the messages can act on them.
 
-The priority site and the alert volcano are chosen per balloon when the message arrives, within
-REACH_LAT degrees of that balloon's latitude, so every request is reachable in its window (the
-balloon drifts a few degrees a day and passes every longitude about every 4-5 days).
+The priority site and the alert volcano are chosen per balloon when the message arrives, between
+NEAR_LAT and FAR_LAT degrees of latitude away from that balloon: reachable in the window (it drifts
+a few degrees a day and passes every longitude about every 4-5 days), but too far to pass by luck,
+so only a balloon that reads the message and acts on it collects.
 """
 import numpy as np
 
@@ -19,7 +20,7 @@ from venus import TARGETS
 
 BONUS = 10.0
 PLUME_MULT = 3.0
-REACH_LAT = 6.0
+NEAR_LAT, FAR_LAT = 10.0, 12.0
 
 
 def make_messages(seed, days):
@@ -35,7 +36,7 @@ def make_messages(seed, days):
     msgs = [
         {"id": "M1", "t_h": t1, "type": "plumes", "until_h": t1 + 8 * H,
          "text": f"Science team: gas plumes are worth {PLUME_MULT:g}x until day {(t1 + 8 * H) / H:.0f}."},
-        {"id": "M2", "t_h": t2, "type": "priority", "until_h": t2 + 7 * H},      # site chosen per balloon
+        {"id": "M2", "t_h": t2, "type": "priority", "until_h": t2 + 10 * H},     # site chosen per balloon
         {"id": "M3", "t_h": t3, "type": "outage", "hemi": str(hemi), "until_h": t3 + 6 * H,
          "text": f"Relay outage: nothing reached in the {hemi}ern hemisphere counts until day {(t3 + 6 * H) / H:.0f}."},
         {"id": "M4", "t_h": t4, "type": "tip", "erupt_h": t4 + rng.uniform(2.0, 3.5) * H},  # volcano per balloon
@@ -48,15 +49,24 @@ def personalize(m, lat, reached, seed):
     Returns (message, extra_event or None)."""
     m = dict(m)
     rng = np.random.default_rng(40_000 + seed * 10 + int(m["id"][1:]))
+    def ok(la):
+        # Same hemisphere (drift fades to nothing at the equator, so crossing it can stall a balloon)
+        # and within 55 degrees of the equator (drift is weak near the poles too).
+        return abs(la) <= 55 and (la >= 2 if lat >= 0 else la <= -2)
+    def pick(places, skip=()):
+        cand = [k for k, (la, _) in places.items() if k not in skip and ok(la)] or [k for k in places if k not in skip]
+        pool = sorted(k for k in cand if NEAR_LAT <= abs(places[k][0] - lat) <= FAR_LAT)
+        if pool:
+            return rng.choice(pool)
+        mid = (NEAR_LAT + FAR_LAT) / 2                       # none in the band: closest to 11 degrees away
+        return min(cand, key=lambda k: abs(abs(places[k][0] - lat) - mid))
     if m["type"] == "priority":
-        pool = [k for k, (la, _) in TARGETS.items() if k not in reached and abs(la - lat) <= REACH_LAT]
-        site = rng.choice(sorted(pool)) if pool else min(TARGETS, key=lambda k: abs(TARGETS[k][0] - lat))
+        site = pick(TARGETS, set(reached))
         m.update(site=str(site), lat=TARGETS[site][0], lon=TARGETS[site][1],
                  text=f"Priority request: pass over {site} before day {m['until_h'] / 24:.0f} for a {BONUS:g}-point bonus.")
         return m, None
     if m["type"] == "tip":
-        pool = [k for k, (la, _) in VOLCANOES.items() if abs(la - lat) <= REACH_LAT]
-        v = rng.choice(sorted(pool)) if pool else min(VOLCANOES, key=lambda k: abs(VOLCANOES[k][0] - lat))
+        v = pick(VOLCANOES)
         m.update(site=str(v), text=f"Seismic alert: {v} is likely to erupt around day {m['erupt_h'] / 24:.0f}. "
                                    f"A major eruption is worth 5 points.")
         la, lo = VOLCANOES[v]

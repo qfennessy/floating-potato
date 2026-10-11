@@ -2,9 +2,9 @@
 // balloon live in the same world: you set the altitude, the same physics as sim/venus.py moves it.
 // No live model calls, so the demo can't crash on stage.
 
-const RUNS = ["best", "vega", "rules", "flash", "agent", "you"];   // draw order: you on top
-const COLOR = { agent: "#ffb347", flash: "#34d399", rules: "#a78bfa", vega: "#c9c9c9", best: "#7cc4ff", you: "#f472b6" };
-const AI = ["agent", "flash"];                          // agent = Gemini Robotics-ER 2, flash = Gemini 3.8 Flash
+const RUNS = ["best", "vega", "rules", "flash", "agent", "hybrid", "you"];   // draw order: you on top
+const COLOR = { agent: "#ffb347", flash: "#34d399", rules: "#a78bfa", hybrid: "#facc15", vega: "#c9c9c9", best: "#7cc4ff", you: "#f472b6" };
+const AI = ["agent", "flash", "hybrid"];   // agent = Gemini Robotics-ER 2, flash = Gemini 3.8 Flash, hybrid = rulebook + ER 2
 const runsIn = () => RUNS.filter((r) => state.world.runs[r]);
 const ais = () => AI.filter((r) => state.world.runs[r]);
 const KIND = { rumble: "eruption", so2: "gas plume", lightning: "lightning", major: "major eruption" };
@@ -107,15 +107,22 @@ function advance([lat, lon, alt], hours, aim) {
 
 // Mission control rules (port of sim/missionctl.py points_for / bonus_targets).
 const msgs = () => state.world.messages || [];
-// Priority and alert requests are personal: picked within REACH_LAT of YOUR latitude when they arrive.
-const REACH_LAT = 6;
+// Priority and alert requests are personal: picked 10-12 degrees of latitude from YOU when they
+// arrive (as in sim/missionctl.py): reachable if you act on them, too far to pass by luck.
+const NEAR_LAT = 10, FAR_LAT = 12;
 const bonusLive = (h) => (state.world.runs.you?.msgs || []).filter((m) => m.type === "priority" && m.t_h <= h && h < m.until_h);
 function personalize(m, lat, got) {
   const rand = rng32(state.world.seed * 31 + Number(m.id.slice(1)));
-  const near = (pts, skip) => Object.keys(pts).filter((k) => !skip.has(k) && Math.abs(pts[k][0] - lat) <= REACH_LAT).sort();
-  const nearest = (pts) => Object.keys(pts).sort((a, b) => Math.abs(pts[a][0] - lat) - Math.abs(pts[b][0] - lat))[0];
+  // Same hemisphere and within 55 degrees of the equator, as in sim/missionctl.py.
+  const okLat = (la) => Math.abs(la) <= 55 && (lat >= 0 ? la >= 2 : la <= -2);
+  const cands = (pts, skip) => { const c = Object.keys(pts).filter((k) => !skip.has(k) && okLat(pts[k][0]));
+                                 return c.length ? c : Object.keys(pts).filter((k) => !skip.has(k)); };
+  const near = (pts, skip) => cands(pts, skip).filter((k) => Math.abs(pts[k][0] - lat) >= NEAR_LAT
+                                                        && Math.abs(pts[k][0] - lat) <= FAR_LAT).sort();
+  const off = (pts, k) => Math.abs(Math.abs(pts[k][0] - lat) - (NEAR_LAT + FAR_LAT) / 2);
+  const nearest = (pts, skip = new Set()) => cands(pts, skip).sort((a, b) => off(pts, a) - off(pts, b))[0];
   if (m.type === "priority") {
-    const pool = near(state.world.targets, got), site = pool.length ? pool[Math.floor(rand() * pool.length)] : nearest(state.world.targets);
+    const pool = near(state.world.targets, got), site = pool.length ? pool[Math.floor(rand() * pool.length)] : nearest(state.world.targets, got);
     const [la, lo] = state.world.targets[site];
     return { ...m, site, lat: la, lon: lo, text: `Priority request: pass over ${site} before day ${Math.round(m.until_h / 24)} for a 10-point bonus.` };
   }
@@ -301,7 +308,7 @@ function drawStrip() {
   for (const a of [50, 56, 62]) ctx.fillText(a, 4, Y(a) + 3);
   ctx.fillStyle = "#a89c8c";
   for (let d = 0; d <= span / 24; d += 5) ctx.fillText(`d${d}`, X(d * 24) - 6, H - 3);
-  const SHORT = { you: "you", agent: "ER", flash: "Fl", rules: "RB", vega: "54", best: "fix" };
+  const SHORT = { you: "you", agent: "ER", flash: "Fl", rules: "RB", hybrid: "Hy", vega: "54", best: "fix" };
   runs.forEach((r, j) => {                                  // one row per balloon: a tick each time it scored
     const y0 = rowsTop + j * ROW;
     ctx.fillStyle = "rgba(255,255,255,0.04)"; ctx.fillRect(X(0), y0, X(span) - X(0), ROW - 2);
@@ -354,7 +361,7 @@ function drawStrip() {
 
 // ---------- side panels ----------
 function drawScore() {
-  const cards = [["you", "You"], ["agent", "Gemini ER 2"], ["flash", "Gemini 3.8 Flash"], ["rules", "Rulebook"],
+  const cards = [["you", "You"], ["hybrid", "Rulebook + Gemini"], ["agent", "Gemini ER 2"], ["flash", "Gemini 3.8 Flash"], ["rules", "Rulebook"],
                  ["vega", "Vega-style drifter"], ["best", "Best single fixed altitude"]].filter(([r]) => state.world.runs[r]);
   const html = cards.map(([r, name]) => {
     // Everyone is scored to the same finish line: the end of the AI flights (day 30). You can keep
@@ -380,7 +387,7 @@ function drawLog() {
   state.logCount = entries.length;
   const label = { strategy: "strategy", detect: "heard", decision: "decided", reached: "reached", missed: "missed", you: "you",
                   message: "mission control", arrived: "arrived" };
-  const who = { agent: "ER 2", flash: "Flash", you: "", mc: "" };
+  const who = { agent: "ER 2", flash: "Flash", hybrid: "Hybrid", you: "", mc: "" };
   $("log").innerHTML = entries.slice().reverse().map((l) =>
     `<li class="${l.kind}"><span class="t">day ${hoursToDay(l.t_h)}</span><span class="who" style="color:${COLOR[l.run]}">${who[l.run]}</span><span class="k">${label[l.kind] || l.kind}</span><br>${escapeHtml(l.text)}${l.kind === "reached" || l.kind === "you" ? ` <b>+${l.pts ?? valueOf(l.target)}</b>` : ""}</li>`
   ).join("") || `<li class="t">Listening…</li>`;
@@ -391,11 +398,11 @@ function drawTable() {
   const rows = state.index.worlds;
   const tot = (k) => rows.reduce((s, r) => s + (r[k] ?? 0), 0);
   $("table").innerHTML =
-    `<tr><th>World</th><th>Gemini ER 2</th><th>Gemini 3.8 Flash</th><th>Rulebook</th><th>Drifter 54 km</th><th>Average fixed altitude</th><th>Best single fixed altitude</th></tr>` +
+    `<tr><th>World</th><th>Rulebook + Gemini</th><th>Gemini ER 2</th><th>Gemini 3.8 Flash</th><th>Rulebook</th><th>Drifter 54 km</th><th>Average fixed altitude</th><th>Best single fixed altitude</th></tr>` +
     rows.map((r) => `<tr class="${r.seed === state.world.seed ? "current" : ""}" data-seed="${r.seed}" style="cursor:pointer">
-      <td>World ${r.seed}</td><td class="${r.agent > r.best ? "win" : ""}">${r.agent}</td><td class="${(r.flash ?? 0) > r.best ? "win" : ""}">${r.flash ?? "–"}</td><td>${r.rules ?? "–"}</td>
+      <td>World ${r.seed}</td><td class="${(r.hybrid ?? 0) > (r.rules ?? 0) ? "win" : ""}">${r.hybrid ?? "–"}</td><td class="${r.agent > r.best ? "win" : ""}">${r.agent}</td><td class="${(r.flash ?? 0) > r.best ? "win" : ""}">${r.flash ?? "–"}</td><td>${r.rules ?? "–"}</td>
       <td>${r.vega}</td><td>${r.avg}</td><td>${r.best} <span class="note">(${r.best_alt} km)</span></td></tr>`).join("") +
-    `<tr><td><b>Total</b></td><td><b>${tot("agent")}</b></td><td><b>${tot("flash")}</b></td><td><b>${tot("rules")}</b></td><td><b>${tot("vega")}</b></td><td><b>${Math.round(tot("avg") * 10) / 10}</b></td><td><b>${tot("best")}</b></td></tr>`;
+    `<tr><td><b>Total</b></td><td><b>${tot("hybrid")}</b></td><td><b>${tot("agent")}</b></td><td><b>${tot("flash")}</b></td><td><b>${tot("rules")}</b></td><td><b>${tot("vega")}</b></td><td><b>${Math.round(tot("avg") * 10) / 10}</b></td><td><b>${tot("best")}</b></td></tr>`;
   $("table").querySelectorAll("tr[data-seed]").forEach((tr) => tr.onclick = () => load(+tr.dataset.seed));
 }
 
@@ -474,6 +481,13 @@ const HOW = {
     same finish line as the AI flights.</p>`,
   agent: () => MODEL_HOW("Gemini Robotics-ER 2", "gemini-robotics-er-2-preview"),
   flash: () => MODEL_HOW("Gemini 3.8 Flash", "gemini-3.8-flash"),
+  hybrid: () => `<h4>Rulebook + Gemini ER 2</h4>
+    <p>The rulebook flies by default: lanes, roaming, and which events to chase. Gemini Robotics-ER 2
+    is consulted only when something comes up that rules can't read:</p>
+    <ul><li>a new mission control message,</li><li>a priority request or volcano alert still open,</li>
+    <li>a burst of eruptions (2+ heard from one volcano in 3 days).</li></ul>
+    <p>Then it sees the same map and prompt as the other models, plus the autopilot's plan, and can keep
+    it, keep it and head for a place, or override it. Log lines show "Autopilot" or "Gemini (why)".</p>`,
   rules: () => `<h4>Rulebook</h4>
     <p>Plain code, no model. Same planner, same check-ins.</p>
     <ol><li>Score each lane: 1 point per unvisited site within reach plus 0.3 per volcano, scaled by the

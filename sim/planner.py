@@ -25,6 +25,9 @@ def as_targets(targets):
 WATCH_KM = 1500     # "near a watch spot" for the dwell reward
 
 
+CHANGE_COST = 25.0  # score per km of altitude change (a site is worth ~1000), scaled up as budget runs low
+
+
 def score_plans(st, plans, todo, first_hit=False, watch=None, watch_w=0.0):
     """Fly every plan (N x segments level indices) from state `st` toward `todo`
     (name -> (lat, lon, value, expires_h)). Returns a score per plan, or with
@@ -41,9 +44,13 @@ def score_plans(st, plans, todo, first_hit=False, watch=None, watch_w=0.0):
     score = np.zeros(n)
     hit = np.full(n, np.inf)
     closest = np.full(n, np.inf)
+    left = max(min(getattr(st, "ballast", 45.0), getattr(st, "gas", 45.0)), 1.0)
+    cost = CHANGE_COST * 45.0 / left
     for k in range(plans.shape[1] * SEG):
         goal = LEVELS[plans[:, k // SEG]]
+        prev_alt = alt
         lat, lon, alt, _ = advance(lat, lon, alt, hours, np.sign(np.round(goal - alt, 3)))
+        score -= cost * np.abs(alt - prev_alt)
         hours += STEP_S / 3600
         live = hours <= tl[:, 3]
         d = gc_km(lat[:, None], lon[:, None], tl[None, :, 0], tl[None, :, 1])

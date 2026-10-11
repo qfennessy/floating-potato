@@ -54,6 +54,7 @@ def build_lanes(k=6, min_gap=7.0):
 
 LANES, LANE_VOLCANOES = build_lanes()
 ROAM = "roam (no lane: fly fast and hunt the nearest unvisited sites)"
+AUTOPILOT = "autopilot"
 PLACES = sorted(set(VOLCANOES) | set(TARGETS))     # names the strategist may head for
 
 
@@ -149,7 +150,7 @@ def render_map(st, view, px=1024):
     return buf.getvalue()
 
 
-def _prompt(st, view):
+def _prompt(st, view, autopilot=None):
     heard = view["events_heard"][-12:]
     lines = "\n".join(f"- hour {l['t_h']:.0f}: {l['text']}" for l in heard) or "- nothing yet"
     msgs = "\n".join(f"- hour {m['t_h']:.0f}: {m['text']}" for m in view.get("messages", [])) or "- none yet"
@@ -158,6 +159,9 @@ def _prompt(st, view):
         f"- {lane} (latitude {lat:+.0f}): about {travel_days(st.lat, lat):.1f} days to get there"
         + ("  <- CURRENT" if lane == current else "") for lane, lat in LANES.items())
     lanes += f"\n- {ROAM}" + ("  <- CURRENT" if current == ROAM else "")
+    if autopilot:
+        lanes = (f"- {AUTOPILOT}: keep the autopilot's plan, which is: {autopilot['lane']} "
+                 f"({autopilot['reason']})\n" + lanes)
     left_days = view["days"] - st.hours / 24
     goto = f"Currently heading for: {view['goto']}.\n" if view.get("goto") else ""
     return (
@@ -166,7 +170,12 @@ def _prompt(st, view):
         "WEST (leftward on the map) all the time, about one lap of the planet every 4-5 days. "
         "The balloon steers only by altitude: low (50 km) is slower and drifts toward the equator; "
         "high (62 km) is faster and drifts toward the poles. A planner handles altitude for you.\n"
-        f"Hour {st.hours:.0f} of {view['days'] * 24:.0f}. Balloon at lat {st.lat:.1f}, lon {st.lon:.1f} E.\n"
+        f"Hour {st.hours:.0f} of {view['days'] * 24:.0f}. Balloon at lat {st.lat:.1f}, lon {st.lon:.1f} E, "
+        f"altitude {st.alt:.1f} km.\n"
+        f"Budget: ballast for {view.get('ballast', st.ballast):.0f} more km of climbing and gas for "
+        f"{view.get('gas', st.gas):.0f} more km of sinking (each started at 45). When one runs out the balloon "
+        "can no longer climb (or sink) for the rest of the mission. Every lane change, chase or detour "
+        "spends some.\n"
         "Points: each named site 1 (once), eruption 2, gas plume 3, lightning 1, unless mission "
         "control says otherwise. Events last 1-3 days and the balloon must pass within 350 km while "
         "one is active.\n"
@@ -180,26 +189,30 @@ def _prompt(st, view):
         "in it once a lap; it is slower than flying high. Sites score only once, so judge from the map "
         "how many unvisited sites each lane still has. Roaming lets the planner chase the nearest "
         "unvisited sites, flying high and fast across latitudes. You can also name one place to head "
-        "for (head_for): the planner flies there, then holds that place's latitude until the next "
-        "check-in, passing it again about every 4-5 days.\n"
+        "for (head_for): the balloon moves onto that place's latitude and holds it until it gets there "
+        "(the wind brings it past within about 4-5 days), then keeps that latitude until the next check-in.\n"
         f"{goto}Choices ({left_days:.1f} days of mission left):\n{lanes}\n"
-        "Call choose_lane once, with a one-sentence reason a mission log reader understands."
+        + ("A reliable autopilot (simple rules that sweep up sites well) flies the balloon by default. "
+           "You are only being asked because something came up: a mission control message, a request "
+           "still open, or a burst of eruptions. Keep the autopilot's lane unless the situation clearly "
+           "calls for something else; you can keep it and still name a place to head for.\n" if autopilot else "")
+        + "Call choose_lane once, with a one-sentence reason a mission log reader understands."
     )
 
 
-def gemini_strategist(model=MODEL, thinking="medium", timeout=120):
+def gemini_strategist(model=MODEL, thinking="medium", timeout=120, hybrid=False):
     key = os.environ.get("GEMINI_API_KEY")
     tool = {"functionDeclarations": [{
         "name": "choose_lane",
         "description": "Choose the latitude lane (or roam) until the next check-in, and optionally one place to head for first.",
         "parameters": {"type": "object", "properties": {
-            "lane": {"type": "string", "enum": list(LANES) + [ROAM]},
+            "lane": {"type": "string", "enum": ([AUTOPILOT] if hybrid else []) + list(LANES) + [ROAM]},
             "head_for": {"type": "string", "enum": ["none"] + PLACES,
                          "description": "A named site or volcano to fly to first, or none."},
             "reason": {"type": "string"}},
             "required": ["lane", "reason"]}}]}
 
-    def decide(st, view):
+    def decide(st, view, autopilot=None):
         if not key:
             out = rule_strategist(st, view)
             out["reason"] += " (rule fallback: no GEMINI_API_KEY)"
@@ -208,7 +221,7 @@ def gemini_strategist(model=MODEL, thinking="medium", timeout=120):
             "contents": [{"role": "user", "parts": [
                 {"inline_data": {"mime_type": "image/png",
                                  "data": base64.b64encode(render_map(st, view)).decode()}},
-                {"text": _prompt(st, view)}]}],
+                {"text": _prompt(st, view, autopilot)}]}],
             "tools": [tool],
             "toolConfig": {"functionCallingConfig": {"mode": "ANY"}},
             "generationConfig": {"thinkingConfig": {"thinkingLevel": thinking}},
@@ -221,6 +234,8 @@ def gemini_strategist(model=MODEL, thinking="medium", timeout=120):
             args = next(p["functionCall"] for p in parts if "functionCall" in p).get("args", {})
             lane, reason = args.get("lane"), args.get("reason", "").strip()
             goto = args.get("head_for") if args.get("head_for") in PLACES else None
+            if lane == AUTOPILOT and autopilot:
+                return {**autopilot, "goto": goto, "reason": reason}
             if lane == ROAM:
                 return roam_choice(view, reason, goto)
             if lane not in LANES:
@@ -230,5 +245,31 @@ def gemini_strategist(model=MODEL, thinking="medium", timeout=120):
             out = rule_strategist(st, view)
             out["reason"] += f" (rule fallback: {type(e).__name__})"
             return out
+
+    return decide
+
+
+def hybrid_strategist(model=MODEL, thinking="medium"):
+    """The rulebook flies; Gemini is consulted only when something comes up that rules can't read:
+    a new mission control message, a request still open, or a burst of eruptions (2+ heard from one
+    volcano in the last 3 days). Otherwise the rulebook's plan stands, with no model call."""
+    ask = gemini_strategist(model, thinking, hybrid=True)
+    seen = {"msgs": 0}
+
+    def decide(st, view):
+        rule = rule_strategist(st, view)
+        msgs = view.get("messages", [])
+        new_msg = len(msgs) > seen["msgs"]
+        open_req = any((m["type"] == "priority" and st.hours < m["until_h"] and f"BONUS:{m.get('site')}" not in view["reached"])
+                       or (m["type"] == "tip" and st.hours < m["erupt_h"] + 120 and "TIP" not in view["reached"])
+                       for m in msgs)
+        recent = [e.site for e in view["known"] if e.site and st.hours - e.t_h <= 72]
+        burst = any(recent.count(v) >= 2 for v in set(recent))
+        if not (new_msg or open_req or burst):
+            return {**rule, "reason": f"Autopilot: {rule['reason']}"}
+        seen["msgs"] = len(msgs)
+        out = ask(st, view, autopilot=rule)
+        why = "new message" if new_msg else "open request" if open_req else "eruption burst"
+        return {**out, "reason": f"Gemini ({why}): {out['reason']}"}
 
     return decide

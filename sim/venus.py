@@ -13,6 +13,8 @@ KM_PER_DEG = np.pi * R_KM / 180     # ~105.6 km per degree of latitude
 STEP_S = 15 * 60                    # one sim step is 15 minutes
 ALT_RATE_KM = 0.5                   # altitude change per step when ascending/descending
 CORRIDOR_KM = (50.0, 62.0)          # below: too hot for the envelope; above: acid cloud top
+BALLAST_KM = 45.0                   # dropping ballast is how a balloon climbs: 45 km of climbing per flight
+GAS_KM = 45.0                       # venting gas is how it sinks: 45 km of sinking per flight
 SOLAR_DAY_H = 116.75 * 24           # Venus solar day in Earth hours (sub-solar point moves slowly)
 
 # 60 real named science sites from the USGS/IAU gazetteer (sim/build_targets.py):
@@ -94,6 +96,8 @@ class State:
     hours: float = 0.0
     lon_flown: float = 0.0          # cumulative degrees travelled westward, for lap counting
     reached: list = field(default_factory=list)
+    ballast: float = BALLAST_KM     # km of climbing left
+    gas: float = GAS_KM             # km of sinking left
 
     @property
     def local_time(self):
@@ -106,10 +110,17 @@ class State:
 
 def step(st: State, action: int, targets=None) -> State:
     """Advance one 15-minute step. action: -1 descend, 0 hold, +1 ascend.
+    Climbing spends ballast and sinking spends gas; with none left, that direction is gone.
     `targets` maps name -> (lat, lon, ...); defaults to the fixed science sites."""
+    if action > 0 and st.ballast < ALT_RATE_KM:
+        action = 0
+    if action < 0 and st.gas < ALT_RATE_KM:
+        action = 0
     lat, lon, alt, dlon = advance(st.lat, st.lon, st.alt, st.hours, action, WX)    # the real weather
+    moved = float(alt) - st.alt
     new = State(float(lat), float(lon), float(alt), st.hours + STEP_S / 3600,
-                st.lon_flown - float(dlon), list(st.reached))
+                st.lon_flown - float(dlon), list(st.reached),
+                st.ballast - max(moved, 0.0), st.gas - max(-moved, 0.0))
     for name, t in (TARGETS if targets is None else targets).items():
         if name not in new.reached and gc_km(new.lat, new.lon, t[0], t[1]) <= CAPTURE_KM:
             new.reached.append(name)

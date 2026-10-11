@@ -57,13 +57,20 @@ class LaneHolder:
         self.n[k] += 1
 
     def act(self, st, lat_target):
-        est = self.estimate() * np.sign(np.sin(2 * np.radians(st.lat)) or 1.0)   # push north per level
+        """Move as little as possible: inside the band, stay put; outside it, go to the nearest
+        altitude level that pushes the right way (stronger push only if ballast and gas allow)."""
         need = lat_target - st.lat
         if abs(need) <= self.band:
-            goal = self.LEVELS[int(np.argmin(np.abs(est)))]                      # stay: least push
-        else:
-            goal = self.LEVELS[int(np.argmax(est * np.sign(need)))]              # go: most push our way
-        return int(np.sign(round(goal - st.alt, 3)))
+            return 0
+        est = self.estimate() * np.sign(np.sin(2 * np.radians(st.lat)) or 1.0)   # push north per level
+        push = est * np.sign(need)                                                # push toward target
+        usable = [k for k in range(len(self.LEVELS))
+                  if push[k] > 0.8 and (self.LEVELS[k] <= st.alt + 0.25 or st.ballast >= self.LEVELS[k] - st.alt)
+                  and (self.LEVELS[k] >= st.alt - 0.25 or st.gas >= st.alt - self.LEVELS[k])]
+        if not usable:
+            usable = [int(np.argmax(push))]
+        k = min(usable, key=lambda k: abs(self.LEVELS[k] - st.alt))              # the closest that works
+        return int(np.sign(round(self.LEVELS[k] - st.alt, 3)))
 
 
 def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, strategist=None,
@@ -90,10 +97,12 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
     policy = drifter(fixed_alt) if fixed_alt else planner
     known, chasing, ignored = {}, None, set()
     holder = LaneHolder()
+    flags = {}
     plan = {"focus": list(VOLCANOES), "fixed": list(TARGETS), "next_h": 0.0, "hold": hold_lat, "lane": None,
             "goto": None}
     PLACES = {**VOLCANOES, **TARGETS}
     log, track = [], [(st.lat, st.lon, st.alt, st.hours)]
+    budget = [(st.ballast, st.gas)]
 
     def say(kind, text, **extra):
         log.append({"t_h": round(st.hours, 2), "kind": kind, "text": text, **extra})
@@ -113,7 +122,8 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
         view = {"track": track, "known": [e for e in known.values()], "events_heard":
                 [l for l in log if l["kind"] == "detect"], "reached": list(st.reached),
                 "unvisited": [t for t in TARGETS if t not in st.reached], "days": days,
-                "lane": plan["lane"], "messages": list(delivered), "goto": plan["goto"]}
+                "lane": plan["lane"], "messages": list(delivered), "goto": plan["goto"],
+                "ballast": st.ballast, "gas": st.gas}
         out = strategist(st, view)
         plan["focus"] = [v for v in out.get("focus", []) if v in VOLCANOES] or plan["focus"]
         plan["fixed"] = [t for t in out.get("fixed", []) if t in TARGETS]
@@ -122,6 +132,7 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
         plan["lane"] = out.get("lane", plan["lane"])
         plan["goto"] = out.get("goto") if out.get("goto") in PLACES else None
         say("strategy", out.get("reason", ""), focus=plan["focus"], fixed=plan["fixed"], hold_lat=plan["hold"],
+            ballast=round(st.ballast, 1), gas=round(st.gas, 1),
             lane=plan["lane"], goto=plan["goto"])
         planner.set_watch([VOLCANOES[v] for v in plan["focus"]], WATCH_W)
         planner.set_targets(planner_targets())
@@ -184,7 +195,12 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
         active = {**TARGETS, **{e.id: (e.lat, e.lon) for e in events if e.t_h <= st.hours < e.ends_h},
                   **bonus_targets(delivered, st.hours)}
         before = set(st.reached)
-        if planner and plan["hold"] is not None and not chasing and not plan["goto"]:
+        if planner and plan["goto"] and not chasing:
+            # Head for a place = get onto its latitude and hold it: the westward wind brings every
+            # longitude past about every 4-5 days. The lane holder learns the real drift; the
+            # planner only knows the forecast, which can push the wrong way.
+            action = holder.act(st, PLACES[plan["goto"]][0])
+        elif planner and plan["hold"] is not None and not chasing:
             action = holder.act(st, plan["hold"])            # cruise in the chosen band
         else:
             action = policy(st)
@@ -192,11 +208,16 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
         st = step(st, action, active)
         if planner:
             holder.observe(prev, st)
+        for what, left in (("ballast", st.ballast), ("gas", st.gas)):          # tell the log once
+            if left < venus.ALT_RATE_KM and not flags.get(what):
+                flags[what] = True
+                say("budget", f"Out of {what}: can no longer {'climb' if what == 'ballast' else 'sink'}.")
         for got in set(st.reached) - before:
             what = (f"the priority site {got[6:]} (bonus)" if got.startswith("BONUS:")
                     else got if got in TARGETS else by_id[got].label())
             say("reached", f"reached {what}", target=got, pts=points_for(got, st.hours, st.lat, by_id, delivered))
         track.append((st.lat, st.lon, st.alt, st.hours))
+        budget.append((st.ballast, st.gas))
 
     points = sum(l["pts"] for l in log if l["kind"] == "reached")
     run = {
@@ -208,6 +229,8 @@ def fly(name, days=10.0, start=None, seed=1, commander=None, fixed_alt=None, str
         "targets": {k: list(v) for k, v in TARGETS.items()},
         "log": log,
         "track": np.round(np.array(track), 3).tolist(),
+        "budget": [[round(b, 1), round(g, 1)] for b, g in budget],
+        "ballast_left": round(st.ballast, 1), "gas_left": round(st.gas, 1),
     }
     RUNS.mkdir(exist_ok=True)
     (RUNS / f"{name}.json").write_text(json.dumps(run))

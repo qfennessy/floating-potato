@@ -7,8 +7,8 @@ import { Line2 } from "three/addons/lines/Line2.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 
-const COLOR = { agent: 0xffb347, flash: 0x34d399, rules: 0xa78bfa, vega: 0xd8d8d8, best: 0x7cc4ff, you: 0xf472b6 };
-const ALL_RUNS = ["best", "vega", "rules", "flash", "agent", "you"];
+const COLOR = { agent: 0xffb347, flash: 0x34d399, rules: 0xa78bfa, hybrid: 0xfacc15, vega: 0xd8d8d8, best: 0x7cc4ff, you: 0xf472b6 };
+const ALL_RUNS = ["best", "vega", "rules", "flash", "agent", "hybrid", "you"];
 const KIND = { rumble: "eruption", so2: "gas plume", lightning: "lightning", major: "major eruption" };
 
 // lat/lon (deg, lon 0..360 E) -> point on a sphere, matching three's SphereGeometry UVs so the

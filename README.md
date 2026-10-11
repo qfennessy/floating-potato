@@ -12,6 +12,18 @@ Why it matters: Venus's surface is 460 °C and 90 atmospheres, so landers die in
 
 Win condition for the demo: the agent reaches more targets in the same number of Earth days than a balloon that rides one altitude around the planet.
 
+## The simple version
+
+**The simulator** is a pretend Venus with a balloon on it. The wind on Venus is like a giant conveyor belt that always pushes the balloon west. The balloon can't steer. It can only go up or down. Higher up, the belt runs faster. Lower down, it runs slower. The wind also nudges the balloon a little north or south, and up high it pushes the opposite way from down low.
+
+The balloon has to stay in a safe zone. Too low and it's too hot. Too high and the clouds eat it. Every 15 pretend minutes, the balloon picks one of three moves: go up, stay, or go down. Then the wind carries it. If it floats close to a target, like a volcano, it gets a point.
+
+**The planner** is the balloon's brain. Every 6 pretend hours, it imagines a few hundred "what if" trips five days ahead. One trip goes high, then low. Another stays low the whole way. It flies all of them in its head at once and keeps the ones that got closest to targets. Then it imagines more trips like the winners, three times over. It takes the first step of the best trip and starts over 6 hours later.
+
+**The drifter** is the dumb balloon. It picks one height and never changes. That's what the real Vega balloons did in 1985.
+
+**As of Oct 11 at noon**, the planner beats the best drifter from 1 of 5 launch points and ties at the other 4. It's smarter, but not much smarter yet. Code: `sim/venus.py` (simulator), `sim/planner.py` (planner), `sim/compare.py` (scoreboard).
+
 ## How the simulation works
 
 A 2D map plus an altitude dimension, stepped every 15 simulated minutes (at 100 m/s that is about 90 km per step, so one lap of the planet is roughly 400 steps).

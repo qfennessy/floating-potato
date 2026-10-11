@@ -21,7 +21,7 @@ Team: one human (Q) and Claude Code.
 | Piece | State | Where |
 |---|---|---|
 | Simulator | Working. Our own plain numpy sim, not Google's Balloon Learning Environment (it is built for Earth; see Prep) | `sim/venus.py` |
-| Winds | Made-up layered winds that match the plan. Real Venus Climate Database winds not pulled yet | `sim/venus.py` |
+| Winds | Synthetic layered winds, tuned to published spacecraft and Vega balloon measurements. Real Venus Climate Database winds not pulled yet | `sim/venus.py` |
 | Planner | Working. Tries a few hundred altitude plans 5 days ahead, every 6 hours | `sim/planner.py` |
 | Science sensor events | Working. Eruptions, gas plumes and lightning appear; the commander chases or ignores each one | `sim/events.py`, `sim/mission.py` |
 | Commander | Gemini Robotics-ER 2 flew all five demo worlds: 41 decisions, 7 chases, no fallbacks. A rule version is the backup | `sim/commander.py` |
@@ -57,7 +57,7 @@ A 2D map plus an altitude dimension, stepped every 15 simulated minutes (at 100 
 | Targets | 4–6 named science sites, each with a capture radius |
 | Score | Targets reached, laps flown, Earth days elapsed |
 
-The constraint that makes it interesting: the balloon lives in a narrow corridor, about 50–62 km. Below it the air is too hot for the envelope; above it the sulfuric-acid cloud top and thinning air end the ride. Inside the corridor, altitude is a speed dial: roughly 60 m/s near the bottom and 100 m/s near the top, always westward. You can never fly backward. Every target comes around again on the next lap, so the game is phasing: pick the altitude that puts you at the target's longitude when your slow north-south drift has brought you to its latitude. An audience understands "conveyor belt plus a speed dial" immediately.
+The constraint that makes it interesting: the balloon lives in a narrow corridor, about 50–62 km. Below it the air is too hot for the envelope; above it the sulfuric-acid cloud top and thinning air end the ride. Inside the corridor, altitude is a speed dial: roughly 62 m/s near the bottom and 98 m/s near the top, always westward. You can never fly backward. Every target comes around again on the next lap, so the game is phasing: pick the altitude that puts you at the target's longitude when your slow north-south drift has brought you to its latitude. An audience understands "conveyor belt plus a speed dial" immediately.
 
 Keep the physics simple: altitude changes at a fixed rate per step, and horizontal motion equals the wind at the current altitude. Nobody will judge buoyancy equations; they will judge whether the agent makes smart choices.
 
@@ -69,11 +69,11 @@ The balloon can't steer north or south directly. It can only change altitude, an
 - **Below about 56 km**, it pushes the balloon toward the equator.
 - **Near 56 km**, the north-south push mostly cancels out.
 
-This is a simplified version of Venus's real circulation (a "Hadley cell"). The push is strongest around 45° latitude and fades to nothing at the equator and the poles. It is slow: about 5° of latitude per Earth day at most, against the 60–100 m/s westward wind. A second, smaller wind flips direction with the time of day. That lets a balloon cross the equator if it times its altitude to the local time.
+This is a simplified version of Venus's real circulation (a "Hadley cell"). The push is strongest around 45° latitude and fades to nothing at the equator and the poles. It is slow: at most about 10 m/s poleward up high (about 8° of latitude per Earth day) and 5 m/s toward the equator down low, against the 62–98 m/s westward wind. It is also strongest in the early afternoon, local time. A second, smaller wind flips direction with the time of day. That lets a balloon cross the equator if it times its altitude to the local time.
 
 The planner has no rule like "go high to head north." It tries hundreds of altitude schedules, flies each one through the same wind model, and keeps the ones that reach targets soonest. Heading north or south falls out of that search. Altitude also sets east-west speed, so the planner has to match the target's latitude and its longitude at the same moment. This also explains a result on the scoreboard: a balloon parked at 50.5 km gets pushed toward the equator the whole time, which happens to be where the volcanoes and most eruptions are.
 
-These winds are made up to match the plan, not taken from real Venus data. The 56 km turning point and the strength of the push are tuning choices in `sim/venus.py`.
+These winds are still made up, not read from a real Venus wind table, but their speeds are tuned to published measurements: the Vega balloons (about 69 m/s at 54 km), Venus Express cloud tracking (60–70 m/s at the cloud base, about 105 m/s at the cloud top, up to 10 m/s poleward), and the multi-year Venus Express study that puts the strongest poleward wind near 45° in the early afternoon. The 56 km turning point is still a tuning choice. Sources are listed in `sim/venus.py`.
 
 ## Sensors
 
@@ -130,7 +130,7 @@ The drifter flies the same sim at a fixed altitude, so the comparison is fair, a
 ## Shortcuts and data sources
 
 - **Simulator:** our own plain 2D numpy sim in `sim/venus.py`. We tried Google's open-source Balloon Learning Environment first and dropped it: it installs, but it is built around one spot on Earth, Earth air pressure, and a score for staying near home.
-- **Winds:** the Venus Climate Database (the LMD group's Venus counterpart of the Mars Climate Database, current release v2.3) gives wind profiles by altitude, latitude, and local time. Not pulled yet; a small table would be a few latitudes × 8 altitude bands × 12 local times. In use now: synthetic winds with zonal speed rising from 60 to 100 m/s across the corridor, a few m/s poleward at the cloud top, equatorward near the base. Sanity-check against the published Vega balloon tracks.
+- **Winds:** the Venus Climate Database (the LMD group's Venus counterpart of the Mars Climate Database, current release v2.3) gives wind profiles by altitude, latitude, and local time. Not pulled yet; a small table would be a few latitudes × 8 altitude bands × 12 local times. In use now: synthetic winds tuned to published measurements, with zonal speed rising from about 62 to 98 m/s across the corridor (69 m/s at 54 km, matching Vega), up to 10 m/s poleward at the top and 5 m/s equatorward near the base.
 - **Map:** a Magellan radar mosaic as the background.
 - **Targets:** real sites so the story lands: Maxwell Montes (the highest peak), Maat Mons (the volcano that was caught changing shape in Magellan data), Alpha Regio (where NASA's DAVINCI probe is headed), Ovda Regio in Aphrodite Terra, plus one "surprise" target (for example a fresh sulfur-dioxide plume) that the commander can choose to chase.
 - **Commander:** Gemini API key from Google AI Studio; confirm `gemini-robotics-er-2-preview` answers a tool call before Sunday. Keep the same tool schema so the planner never cares which model is behind it.

@@ -28,17 +28,25 @@ CAPTURE_KM = 350.0
 def wind(lat, alt_km, local_time_h):
     """Return (u, v) in m/s. u < 0 is westward; v > 0 is northward.
 
-    Zonal: 60 m/s at the corridor floor rising to 100 m/s at the top,
-    falling off with cos(latitude) like near-solid-body superrotation.
-    Meridional: a Hadley-style cell, poleward near the cloud top and
-    equatorward near the base, plus a small thermal-tide term that lets
-    a balloon cross the equator if it times its altitude to local time.
+    Still synthetic, but tuned to published cloud-tracking and balloon winds:
+    Zonal: ~62 m/s at the corridor floor (VIRTIS lower clouds, Gorinov et al. 2021),
+    ~69 m/s at 54 km (Vega balloons, 1985), ~98 m/s at the top, heading for the
+    ~105 m/s cloud tops (Sanchez-Lavega et al. 2008). Roughly flat in latitude to
+    50 deg, then falling toward the pole, as Venus Express saw.
+    Meridional: a Hadley-style cell, poleward near the cloud top (up to 10 m/s,
+    Sanchez-Lavega et al. 2008) and a weaker equatorward return near the base,
+    strongest near 45 deg and in the early afternoon (VIRTIS six-year study, 2024),
+    plus a small thermal-tide term that lets a balloon cross the equator if it
+    times its altitude to local time.
     """
     s = (alt_km - CORRIDOR_KM[0]) / (CORRIDOR_KM[1] - CORRIDOR_KM[0])   # 0 at floor, 1 at top
     lat_r = np.radians(lat)
-    u = -(60.0 + 40.0 * s) * np.cos(lat_r)
+    jet = np.minimum(1.0, np.cos(lat_r) / np.cos(np.radians(50.0)))      # flat to 50 deg, then fades
+    u = -(62.0 + 36.0 * s ** 1.5) * jet
     u += 4.0 * np.cos(2 * np.pi * local_time_h / 24.0)                   # diurnal tide on speed
-    hadley = 6.0 * (2 * s - 1) * np.sin(2 * lat_r)                       # -6..+6 m/s
+    cell = (2 * s - 1) * np.where(s > 0.5, 10.0, 5.0)                    # -5..+10 m/s
+    afternoon = 1.0 + 0.3 * np.cos(2 * np.pi * (local_time_h - 15.0) / 24.0)
+    hadley = cell * np.sin(2 * lat_r) * afternoon / 1.3                  # peak stays at 10 m/s
     tide_v = 2.0 * np.sin(2 * np.pi * local_time_h / 24.0) * (2 * s - 1)
     return u, hadley + tide_v
 

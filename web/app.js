@@ -164,7 +164,8 @@ function syncYou() {
           old ? Object.assign(old, ev) : state.world.events.push(ev);
         }
       }
-    const active = state.world.events.filter((e) => e.t_h <= hours && hours < e.ends_h);
+    // "TIP" is ER 2's personal alert eruption (in the shared event list for display); yours is YOU_TIP.
+    const active = state.world.events.filter((e) => e.id !== "TIP" && e.t_h <= hours && hours < e.ends_h);
     const next = advance(you.track[k], hours, state.aim);
     you.track.push(next);
     you.aims.push(state.aim);

@@ -98,7 +98,7 @@ If the 16:00 run/bike tempts you, take it only if the planner already works.
 **Before Sunday**
 
 - [x] Export the Venus wind table from the Venus Climate Database (or write the synthetic fallback). Synthetic fallback done in `sim/venus.py`; the real Venus Climate Database table is still open
-- [ ] Clone the Balloon Learning Environment and confirm it installs
+- [x] Clone the Balloon Learning Environment and confirm it installs. It installs (Python 3.10, `numpy<2`, `scipy<1.14`, plus `tensorboard`), but it assumes Earth: flat x/y around one home spot, altitude from Earth air pressure, and a score for staying near that spot. Decision: skip it and use the numpy sim in `sim/venus.py`
 - [x] Download a Magellan basemap image and pick the 4–6 target sites. Map in `assets/` (USGS, public domain); 6 targets in `sim/venus.py`
 - [x] Get a Gemini API key and confirm Gemini Robotics-ER 2 returns a tool call (confirmed via the API on Oct 11: `set_target` called correctly, about 1 s per reply)
 - [x] Write the noon pitch: two sentences and one sketch of the map. Sketch at `docs/pitch_sketch.png`, drawn from a real sim run (`uv run --with numpy --with matplotlib python sim/sketch.py`)

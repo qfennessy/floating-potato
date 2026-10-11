@@ -223,3 +223,5 @@ main { margin-top: 16px; }
 .finish li b { text-align: right; font-family: "JetBrains Mono", monospace; }
 .finish li em { color: #f87171; font-style: normal; font-size: 12px; }
 .finish .fbtns { display: flex; gap: 8px; margin-top: 10px; }
+
+.glabel.wreck { color: #f87171; font-size: 11px; font-weight: 700; }

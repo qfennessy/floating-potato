@@ -335,6 +335,9 @@ class Globe {
     this.syncEvents();
     this.markers = [];
     this.trail = {};
+    this.effects = []; this.deadShown = {};
+    this.wrecks = new THREE.Group(); this.dynamic.add(this.wrecks);
+    this.startDeploy();
     this.nameTag = label("", "nametag");
     this.dynamic.add(this.nameTag);
     this.select(this.sel in world.runs ? this.sel : "agent");
@@ -392,6 +395,10 @@ class Globe {
       this.updateTrail(r, track, j);
       const [lat, lon, alt] = this.interp(track, r === "you" ? j : T / this.world.step_h);
       this.balloons[r].position.copy(toXYZ(lat, lon, altR(alt)));
+      if (this.deploy) {                                             // no trails until they're out
+        this.lines[r].geometry.instanceCount = 0;
+        (this.deploy.target ||= {})[r] = this.balloons[r].position.clone();
+      }
       const tp = this.tethers[r].geometry.attributes.position;
       const g0 = toXYZ(lat, lon, 1.0);
       tp.setXYZ(0, g0.x, g0.y, g0.z); tp.setXYZ(1, this.balloons[r].position.x, this.balloons[r].position.y, this.balloons[r].position.z);
@@ -425,9 +432,19 @@ class Globe {
     const sp = this.balloons[this.sel];             // name tag on the balloon you're watching
     if (sp) { this.nameTag.position.copy(sp.position).multiplyScalar(1.04); this.nameTag.element.textContent = NAMES[this.sel];
               this.nameTag.element.style.color = "#" + COLOR[this.sel].toString(16).padStart(6, "0"); }
-    for (const r of this.runs) {                     // a lost balloon turns grey
+    for (const r of this.runs) {                     // a lost balloon: burst (if we saw it happen), then a wreck marker
       const lost = this.world.runs[r].lost_h, dead = (lost != null && T >= lost) || (r === "you" && this.world.runs.you.track.at(-1)[6] === 0);
       this.balloons[r].material.color.set(dead ? 0x555555 : COLOR[r]);
+      this.tethers[r].visible = !dead;
+      if (dead && !this.deadShown[r]) {
+        this.deadShown[r] = true;
+        this.fail(r, forward, lost ?? T);
+      } else if (!dead && this.deadShown[r]) {        // rewound past the failure
+        this.deadShown[r] = false;
+        for (const w of [...this.wrecks.children]) if (w.userData.run === r) this.wrecks.remove(w);
+        this.balloons[r].visible = true;
+      }
+      if (dead && this.deadShown[r] && !this.effects.some((e) => e.run === r)) this.balloons[r].visible = false;
     }
   }
 
@@ -516,6 +533,132 @@ class Globe {
 
   setFinished(on) { if (on !== this.finished) this.finishedChanged = true; this.finished = on; }
 
+  // ---------- deployment: a capsule streaks in, slows under a parachute, and releases the balloons ----------
+  startDeploy() {
+    const [lat, lon] = this.world.start;
+    const P = toXYZ(lat, lon, altR(64));
+    const up = P.clone().normalize(), east = new THREE.Vector3(0, 1, 0).cross(up).normalize();
+    const S = up.clone().multiplyScalar(3.4).add(east.clone().multiplyScalar(1.6));
+    const capsule = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.04, 16), new THREE.MeshBasicMaterial({ color: 0xd9d4cc }));
+    const heat = glowSprite(0xffa040, 0.16, 1);
+    capsule.add(heat);
+    const trail = new THREE.Line(new THREE.BufferGeometry().setFromPoints([S, S]),
+      new THREE.LineBasicMaterial({ color: 0xffb060, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending }));
+    const chute = new THREE.Mesh(new THREE.SphereGeometry(0.035, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xf5efe6, side: THREE.DoubleSide, transparent: true, opacity: 0 }));
+    for (const o of [capsule, trail, chute]) { o.frustumCulled = false; this.dynamic.add(o); }
+    this.deploy = { age: 0, S, P, up, capsule, heat, trail, chute, flashed: false };
+    this.frameHero([P, P.clone().multiplyScalar(0.97)]);
+  }
+  endDeploy() {
+    const d = this.deploy;
+    if (!d) return;
+    for (const o of [d.capsule, d.trail, d.chute]) this.dynamic.remove(o);
+    for (const r of this.runs || []) this.balloons[r].scale.setScalar(r === this.sel ? 1.35 : 1);
+    this.deploy = null;
+    this.endHero();
+    document.dispatchEvent(new Event("deploy-done"));
+  }
+  stepDeploy(dt) {
+    const d = this.deploy;
+    if (!d) return;
+    d.age += dt * 1000;
+    const a = d.age, ease = (x) => 1 - (1 - x) ** 3;
+    if (a < 1800) {                                         // entry: streak in from space, glowing
+      const f = ease(a / 1800), p = d.S.clone().lerp(d.P, f);
+      d.capsule.position.copy(p);
+      d.capsule.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), d.P.clone().sub(d.S).normalize());
+      d.trail.geometry.setFromPoints([d.S.clone().lerp(d.P, Math.max(0, f - 0.35)), p]);
+      d.heat.material.opacity = 1 - f * 0.4;
+    } else {
+      if (!d.flashed) { d.flashed = true; this.flashAt(d.P, 0xfff2d0, 0.3); d.trail.visible = false; }
+      const f = Math.min((a - 1800) / 2400, 1);              // parachute: slow drift down a little
+      d.capsule.position.copy(d.P.clone().lerp(d.up.clone().multiplyScalar(altR(58)), f));
+      d.capsule.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.up);
+      d.heat.material.opacity = Math.max(0, 0.6 - f);
+      d.chute.position.copy(d.capsule.position).add(d.up.clone().multiplyScalar(0.05));
+      d.chute.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.up);
+      d.chute.material.opacity = Math.min(1, (a - 1800) / 300) * (1 - Math.max(0, (a - 3800) / 400));
+    }
+    // Balloons pop out one by one from 2400 ms, inflate, and move to their real starting positions.
+    (this.runs || []).forEach((r, k) => {
+      const t0 = 2400 + k * 180, f = Math.max(0, Math.min((a - t0) / 900, 1));
+      const target = (d.target && d.target[r]) || this.balloons[r].position.clone();
+      this.balloons[r].position.copy(d.capsule.position.clone().lerp(target, ease(f)));
+      this.balloons[r].scale.setScalar(Math.max(0.001, ease(f) * (r === this.sel ? 1.35 : 1)));
+      if (f > 0 && !this.balloons[r].userData.popped) { this.balloons[r].userData.popped = true; this.flashAt(d.capsule.position, COLOR[r], 0.12); }
+    });
+    if (a > 4400) { for (const r of this.runs || []) this.balloons[r].userData.popped = false; this.endDeploy(); }
+  }
+  isDeploying() { return !!this.deploy; }
+
+  // ---------- a balloon fails: flash, shock ring, falling debris, and a wreck marker ----------
+  fail(r, animate, lostH) {
+    const ball = this.balloons[r], p = ball.position.clone(), up = p.clone().normalize();
+    const ground = up.clone().multiplyScalar(1.004);
+    const wreck = new THREE.Group();
+    wreck.userData.run = r;
+    const mark = glowSprite(0x777777, 0.05, 0.9);
+    mark.position.copy(ground);
+    const tag = label(`✕ ${NAMES[r]} lost · day ${Math.floor(lostH / 24)}`, "wreck");
+    tag.position.copy(up.clone().multiplyScalar(1.03));
+    wreck.add(mark); wreck.add(tag);
+    this.wrecks.add(wreck);
+    if (!animate) { ball.visible = false; return; }
+    this.flashAt(p, 0xffd0a0, 0.35);
+    // shock ring around the balloon, tangent to the planet
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.02, 0.026, 48), new THREE.MeshBasicMaterial({ color: 0xff6040,
+      transparent: true, opacity: 1, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+    ring.position.copy(p); ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), up);
+    // debris: small sparks that fly out and fall toward the surface
+    const n = 40, pos = new Float32Array(n * 3), vel = [];
+    for (let k = 0; k < n; k++) {
+      pos.set([p.x, p.y, p.z], k * 3);
+      vel.push(new THREE.Vector3().randomDirection().multiplyScalar(0.05 + Math.random() * 0.08));
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    const debris = new THREE.Points(g, new THREE.PointsMaterial({ map: GLOW, color: 0xffa060, size: 0.018, transparent: true,
+      opacity: 1, depthWrite: false, blending: THREE.AdditiveBlending }));
+    debris.frustumCulled = false;
+    for (const o of [ring, debris]) this.dynamic.add(o);
+    this.effects.push({ run: r, age: 0, ring, debris, vel, from: p, ground, up });
+    document.dispatchEvent(new CustomEvent("balloon-lost", { detail: r }));
+  }
+  flashAt(p, color, size) {
+    const f = glowSprite(color, size, 1);
+    f.position.copy(p);
+    this.dynamic.add(f);
+    this.effects.push({ age: 0, flash: f, size });
+  }
+  stepEffects(dt) {
+    for (const e of this.effects || []) {
+      e.age += dt * 1000;
+      if (e.flash) {                                          // quick bright flash
+        const f = e.age / 600;
+        e.flash.scale.setScalar(e.size * (1 + 2 * f));
+        e.flash.material.opacity = Math.max(0, 1 - f);
+        if (f >= 1) { this.dynamic.remove(e.flash); e.done = true; }
+        continue;
+      }
+      const f = Math.min(e.age / 2200, 1);
+      e.ring.scale.setScalar(1 + 9 * f);
+      e.ring.material.opacity = 1 - f;
+      const pa = e.debris.geometry.attributes.position, gravity = e.up.clone().multiplyScalar(-0.25 * dt);
+      for (let k = 0; k < e.vel.length; k++) {
+        e.vel[k].add(gravity).multiplyScalar(0.98);
+        pa.setXYZ(k, pa.getX(k) + e.vel[k].x * dt, pa.getY(k) + e.vel[k].y * dt, pa.getZ(k) + e.vel[k].z * dt);
+      }
+      pa.needsUpdate = true;
+      e.debris.material.opacity = 1 - f;
+      const ball = this.balloons[e.run];                      // the balloon itself drops to the ground, shrinking
+      ball.visible = true;
+      ball.position.copy(e.from.clone().lerp(e.ground, f * f));
+      ball.scale.setScalar(Math.max(0.2, 1 - f));
+      if (f >= 1) { this.dynamic.remove(e.ring); this.dynamic.remove(e.debris); ball.visible = false; e.done = true; }
+    }
+    if (this.effects) this.effects = this.effects.filter((e) => !e.done);
+  }
+
   // Hero shot: frame the given points (balloon, volcano) with the layers between them.
   frameHero(points) {
     const c = points.reduce((a, p) => a.add(p.clone()), new THREE.Vector3()).multiplyScalar(1 / points.length);
@@ -541,6 +684,8 @@ class Globe {
     this.lastMs = now;
     const dt = this.paused ? 0 : real;                 // paused: the whole scene freezes (the camera still moves)
     if (dt > 0) this.stepWind(dt);
+    this.stepDeploy(dt);
+    this.stepEffects(dt);
     const sel = this.selPos();
     if (sel) this.shell.rotation.y = this.ribbons.rotation.y = sel.lon / 360 * Math.PI * 2;   // wedge on the selected balloon
     if (this.hero) {

@@ -514,6 +514,15 @@ function noise(ctx, secs) {
   for (let k = 0; k < d.length; k++) d[k] = Math.random() * 2 - 1;
   const src = ctx.createBufferSource(); src.buffer = buf; return src;
 }
+function playPop() {                                   // a balloon bursting: a short bright pop
+  const ctx = audio.ctx;
+  if (!audio.on || !ctx || ctx.state !== "running") return;
+  const now = ctx.currentTime, src = noise(ctx, 0.35), filt = ctx.createBiquadFilter(), gain = ctx.createGain();
+  filt.type = "highpass"; filt.frequency.value = 900;
+  gain.gain.setValueAtTime(0.5, now); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+  src.connect(filt).connect(gain).connect(ctx.destination); src.start(now); src.stop(now + 0.35);
+}
+document.addEventListener("balloon-lost", playPop);
 function playVolcano(kind) {
   const ctx = audio.ctx;
   if (!audio.on || !ctx || ctx.state !== "running") return;
@@ -727,7 +736,7 @@ function showFinish() {
     <p class="fnote">You placed <b>${you}</b> of ${rows.length}.</p>
     <div class="fbtns"><button id="freplay">Replay</button><button id="fnext">Next world</button><button id="fclose">Close</button></div>`;
   $("finish").hidden = false;
-  $("freplay").onclick = () => { $("finish").hidden = true; state.T = 0; setPlaying(true); };
+  $("freplay").onclick = () => { $("finish").hidden = true; state.T = 0; setPlaying(true); globe() && globe().startDeploy(); };
   $("fnext").onclick = () => { $("finish").hidden = true; const ws = state.index.worlds.map((x) => x.seed); load(ws[(ws.indexOf(w.seed) + 1) % ws.length]); };
   $("fclose").onclick = () => { $("finish").hidden = true; };
 }
@@ -765,7 +774,8 @@ function frame(now) {
   const dt = state.last ? (now - state.last) / 1000 : 0;
   state.last = now;
   if (state.world) {
-    if (state.playing) {
+    const deploying = globe() && globe().isDeploying();
+    if (state.playing && !deploying) {
       state.T = Math.min(state.T + dt * state.speed, endH());   // the clock stops at day 31
       if (state.T >= endH()) setPlaying(false);
     }
@@ -775,7 +785,7 @@ function frame(now) {
     if (state.T < totalH() - 1) state.finishShown = false;
     if (state.frameN % 10 === 0) drawWindPanel();
     state.frameN += 1;
-    if (globe() && state.frameN % 6 === 0) globe().setForecast(forecastSel());
+    if (globe() && state.frameN % 6 === 0) globe().setForecast(healthAt(state.sel)[1] ? null : forecastSel());   // no forecast for a lost balloon
     if (globe()) globe().setFinished(state.T >= totalH());
     const ym = state.world.runs.you.msgs;
     if (globe() && ym.length !== state.markerCount) { state.markerCount = ym.length; globe().setMarkers(ym); }
@@ -828,6 +838,7 @@ async function init() {
     if (e.key === " " && e.target.tagName !== "BUTTON") { $("play").click(); e.preventDefault(); }
   });
   $("play").onclick = () => {
+    if (globe() && globe().isDeploying()) { globe().endDeploy(); return; }   // a click skips the deployment
     if (state.hero) {                                   // your click wins over a hero shot
       state.speed = state.hero.speed; $("speed").value = String(state.speed);
       globe() && globe().endHero(); state.hero = null;
@@ -867,7 +878,8 @@ async function init() {
     $("sound").classList.toggle("on", audio.on);
   };
   $("speed").value = String(state.speed);
-  $("scrub").oninput = (e) => { state.T = e.target.value / 1000 * endH(); state.logCount = -1; };
+  $("scrub").oninput = (e) => {
+    if (globe() && globe().isDeploying()) globe().endDeploy(); state.T = e.target.value / 1000 * endH(); state.logCount = -1; };
   const q = +new URLSearchParams(location.search).get("world");
   await load(state.index.worlds.some((w) => w.seed === q) ? q : 7);   // world 7: the clearest agent win; the table shows all 20
   if (location.hash === "#fly") select("you");          // from the landing page's "Fly it yourself"

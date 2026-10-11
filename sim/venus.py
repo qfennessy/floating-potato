@@ -84,13 +84,14 @@ class State:
         return self.lon_flown / 360.0
 
 
-def step(st: State, action: int) -> State:
-    """Advance one 15-minute step. action: -1 descend, 0 hold, +1 ascend."""
+def step(st: State, action: int, targets=None) -> State:
+    """Advance one 15-minute step. action: -1 descend, 0 hold, +1 ascend.
+    `targets` maps name -> (lat, lon, ...); defaults to the fixed science sites."""
     lat, lon, alt, dlon = advance(st.lat, st.lon, st.alt, st.hours, action)
     new = State(float(lat), float(lon), float(alt), st.hours + STEP_S / 3600,
                 st.lon_flown - float(dlon), list(st.reached))
-    for name, (tlat, tlon) in TARGETS.items():
-        if name not in new.reached and gc_km(new.lat, new.lon, tlat, tlon) <= CAPTURE_KM:
+    for name, t in (TARGETS if targets is None else targets).items():
+        if name not in new.reached and gc_km(new.lat, new.lon, t[0], t[1]) <= CAPTURE_KM:
             new.reached.append(name)
     return new
 

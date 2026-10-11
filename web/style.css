@@ -63,7 +63,10 @@ button:hover { border-color: var(--agent); }
 .legend span { display: flex; gap: 6px; align-items: center; }
 .sw { display: inline-block; width: 18px; height: 3px; border-radius: 2px; }
 .sw.you { background: var(--you); }
-.sw.agent { background: var(--agent); } .sw.vega { background: var(--vega); } .sw.best { background: var(--best); }
+.sw.agent { background: var(--agent); }
+.sw.flash { background: #34d399; }
+.score .flash b { color: #34d399; }
+.log li .who { font: 600 11px Inter, sans-serif; margin-left: 6px; } .sw.vega { background: var(--vega); } .sw.best { background: var(--best); }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid; }
 .dot.ev { border-color: var(--event); } .dot.heard { border-color: var(--heard); }
 

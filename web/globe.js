@@ -7,8 +7,8 @@ import { Line2 } from "three/addons/lines/Line2.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 
-const COLOR = { agent: 0xffb347, vega: 0xd8d8d8, best: 0x7cc4ff, you: 0xf472b6 };
-const RUNS = ["best", "vega", "agent", "you"];
+const COLOR = { agent: 0xffb347, flash: 0x34d399, vega: 0xd8d8d8, best: 0x7cc4ff, you: 0xf472b6 };
+const ALL_RUNS = ["best", "vega", "flash", "agent", "you"];
 const KIND = { rumble: "eruption", so2: "gas plume", lightning: "lightning" };
 
 // lat/lon (deg, lon 0..360 E) -> point on a sphere, matching three's SphereGeometry UVs so the
@@ -141,7 +141,8 @@ class Globe {
     this.world = world;
     this.dynamic.clear();
     this.lines = {}; this.balloons = {}; this.youLen = -1;
-    for (const r of RUNS) {
+    this.runs = ALL_RUNS.filter((r) => world.runs[r]);
+    for (const r of this.runs) {
       const tr = world.runs[r].track;
       const pos = [];
       tr.forEach(([lat, lon, alt]) => { const p = toXYZ(lat, lon, altR(alt)); pos.push(p.x, p.y, p.z); });
@@ -180,25 +181,37 @@ class Globe {
       this.dynamic.add(m);
       return { name, mesh: m, label: l };
     });
-    this.events = world.events.map((e) => {
+    this.events = [];
+    this.syncEvents();
+    // Sites get name labels only if they are among the 12 biggest, or once a balloon reaches them.
+    this.big = new Set(Object.entries(world.target_size || {}).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k]) => k));
+  }
+
+  // Events can be added while you fly past the precomputed days; give each new one a ring and label.
+  syncEvents() {
+    const world = this.world;
+    for (let k = this.events.length; k < world.events.length; k++) {
+      const e = world.events[k];
       const g = ring(e.lat, e.lon, world.capture_km, 1.004);
       const l = label(`${KIND[e.kind]}${e.site ? " · " + e.site : ""} (+${e.value})`, "event");
       l.position.copy(toXYZ(e.lat, e.lon, 1.02));
+      g.visible = false; l.visible = false;
       this.dynamic.add(g); this.dynamic.add(l);
-      return { e, ring: g, label: l };
-    });
+      this.events.push({ e, ring: g, label: l });
+    }
   }
 
   // Called every frame by app.js with the mission clock (hours) and helper sets.
   update(T, i, heard, agentGot, anyGot) {
     if (!this.world) return;
     this.T = T;
+    this.syncEvents();
     // Your track grows live: refresh its line when it gets longer or is rewound.
     const yt = this.world.runs.you.track;
     if (yt.length !== this.youLen) {
       this.youLen = yt.length;
       const pos = [];
-      for (let k = 0; k < this.world.runs.agent.track.length; k++) {
+      for (let k = 0; k < Math.max(yt.length, 2); k++) {
         const [la, lo, al] = yt[Math.min(k, yt.length - 1)];
         const p = toXYZ(la, lo, altR(al) + YOU_LIFT);
         pos.push(p.x, p.y, p.z);
@@ -226,14 +239,16 @@ class Globe {
         piece.geometry.setPositions(pts);
       });
     }
-    for (const r of RUNS) {
-      const track = this.world.runs[r].track, j = Math.min(i, track.length - 1);
+    for (const r of this.runs) {
+      const track = this.world.runs[r].track, j = r === "you" ? track.length - 1 : Math.min(i, track.length - 1);
       this.lines[r].geometry.instanceCount = Math.max(j, 1);   // Line2 draws one segment per instance
       const [lat, lon, alt] = track[j];
       this.balloons[r].position.copy(toXYZ(lat, lon, altR(alt) + (r === "you" ? YOU_LIFT : 0)));
     }
-    for (const t of this.targets)
+    for (const t of this.targets) {
       t.mesh.material.color.set(agentGot.has(t.name) ? 0x4ade80 : anyGot.has(t.name) ? 0x7cc4ff : 0xf2e6d0);
+      t.label.visible = this.big.has(t.name) || agentGot.has(t.name) || anyGot.has(t.name);
+    }
     for (const ev of this.events) {
       const live = T >= ev.e.t_h && T < ev.e.ends_h;
       ev.ring.visible = live;
@@ -259,7 +274,7 @@ class Globe {
     // Hide labels on the far side of the planet.
     const cam = this.camera.position.clone().normalize();
     const facing = (o) => o.getWorldPosition(new THREE.Vector3()).normalize().dot(cam) > 0.15;
-    for (const t of this.targets || []) t.label.element.style.opacity = facing(t.label) ? 1 : 0;
+    for (const t of this.targets || []) if (t.label.visible) t.label.element.style.opacity = facing(t.label) ? 1 : 0;
     for (const ev of this.events || []) if (ev.label.visible) ev.label.element.style.opacity = facing(ev.label) ? 1 : 0;
     this.renderer.render(this.scene, this.camera);
     this.labels.render(this.scene, this.camera);

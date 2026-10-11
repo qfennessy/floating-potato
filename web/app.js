@@ -2,13 +2,16 @@
 // balloon live in the same world: you set the altitude, the same physics as sim/venus.py moves it.
 // No live model calls, so the demo can't crash on stage.
 
-const RUNS = ["best", "vega", "agent", "you"];        // draw order: you on top
-const COLOR = { agent: "#ffb347", vega: "#c9c9c9", best: "#7cc4ff", you: "#f472b6" };
+const RUNS = ["best", "vega", "flash", "agent", "you"];   // draw order: you on top
+const COLOR = { agent: "#ffb347", flash: "#34d399", vega: "#c9c9c9", best: "#7cc4ff", you: "#f472b6" };
+const AI = ["agent", "flash"];                          // agent = Gemini Robotics-ER 2, flash = Gemini 3.8 Flash
+const runsIn = () => RUNS.filter((r) => state.world.runs[r]);
+const ais = () => AI.filter((r) => state.world.runs[r]);
 const KIND = { rumble: "eruption", so2: "gas plume", lightning: "lightning" };
 
 const $ = (id) => document.getElementById(id);
 const mapC = $("map"), stripC = $("strip");
-const state = { world: null, T: 0, playing: true, speed: 2, last: 0, logCount: -1, index: null, aim: 56 };
+const state = { world: null, T: 0, maxT: 0, playing: true, speed: 2, last: 0, logCount: -1, index: null, aim: 56, big: new Set() };
 const basemap = new Image();
 basemap.src = "data/venus_0_360.jpg";
 
@@ -25,7 +28,10 @@ function fit(c) {
 const xy = (lat, lon, W, H) => [((lon % 360) + 360) % 360 / 360 * W, (90 - lat) / 180 * H];
 const hoursToDay = (h) => (h / 24).toFixed(1);
 const totalH = () => state.world.days * 24;
+// Replayed flights end when their precomputed data does (day 30); yours never ends.
 const idx = (T) => Math.min(Math.floor(T / state.world.step_h), state.world.runs.agent.track.length - 1);
+const idxYou = (T) => Math.floor(T / state.world.step_h);
+const runIdx = (r, i) => (r === "you" ? state.world.runs.you.track.length - 1 : i);
 
 function valueOf(target) {
   const ev = state.world.events.find((e) => e.id === target);
@@ -35,7 +41,31 @@ function reachedBy(run, T) {
   return state.world.runs[run].log.filter((l) => (l.kind === "reached" || l.kind === "you") && l.t_h <= T).map((l) => l.target);
 }
 function heardBy(T) {
-  return new Set(state.world.runs.agent.log.filter((l) => l.kind === "detect" && l.t_h <= T).map((l) => l.event));
+  return new Set(ais().flatMap((r) => state.world.runs[r].log).filter((l) => l.kind === "detect" && l.t_h <= T).map((l) => l.event));
+}
+const gotBy = (runs, T) => new Set(runs.filter((r) => state.world.runs[r]).flatMap((r) => reachedBy(r, T)));
+
+// After the precomputed days, new events are made up here as the clock runs (same kinds and
+// rates as sim/events.py, a different random stream), so a long flight always has something to chase.
+const EV = { rumble: { value: 2, life: 72, p: 0.4, text: "low rumble, maybe an eruption" },
+             so2: { value: 3, life: 48, p: 0.35, text: "sulfur dioxide spike, a fresh plume" },
+             lightning: { value: 1, life: 12, p: 0.25, text: "radio crackle, possible lightning" } };
+function rng32(a) { return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function extendEvents(T) {
+  const w = state.world, g = state.gen;
+  const names = Object.keys(w.volcanoes || {});          // older data files have no volcano list
+  while (g.t < T + 72) {
+    const r = g.rand();
+    const kind = !names.length ? "lightning" : r < EV.rumble.p ? "rumble" : r < EV.rumble.p + EV.so2.p ? "so2" : "lightning";
+    let lat, lon, site = "";
+    if (kind === "lightning") { lat = -35 + 70 * g.rand(); lon = 360 * g.rand(); }
+    else { site = names[Math.floor(g.rand() * names.length)]; [lat, lon] = w.volcanoes[site]; }
+    g.n += 1;
+    w.events.push({ id: `L${g.n}`, kind, t_h: g.t, lat, lon, site, value: EV[kind].value, ends_h: g.t + EV[kind].life,
+                    sensor: "", text: EV[kind].text });
+    g.t += -Math.log(1 - g.rand()) * 10;
+  }
 }
 
 // ---------- live physics: a port of sim/venus.py (keep the two in step) ----------
@@ -76,7 +106,8 @@ function newYou() {
   return { label: "You", track: [[lat, lon, 56]], log: [], aims: [] };
 }
 function syncYou() {
-  const you = state.world.runs.you, want = idx(state.T);
+  const you = state.world.runs.you, want = idxYou(state.T);
+  extendEvents(want * state.world.step_h);
   if (you.track.length - 1 > want) {                           // scrubbed back: rewind
     you.track.length = want + 1;
     you.aims.length = want;
@@ -114,7 +145,7 @@ function drawPilot() {
 // ---------- map ----------
 function drawMap() {
   const [ctx, W, H] = fit(mapC);
-  const T = state.T, i = idx(T), w = state.world;
+  const T = state.T, i0 = idx(T), w = state.world;
   ctx.clearRect(0, 0, W, H);
   if (basemap.complete && basemap.naturalWidth) {
     ctx.filter = "sepia(0.9) saturate(1.6) brightness(0.75)";
@@ -133,8 +164,8 @@ function drawMap() {
 
   const capPx = (w.capture_km / 105.6) / 180 * H;
   const heard = heardBy(T);
-  const agentGot = new Set(reachedBy("agent", T));
-  const anyGot = new Set([...reachedBy("vega", T), ...reachedBy("best", T)]);
+  const agentGot = gotBy([...AI, "you"], T);
+  const anyGot = gotBy(["vega", "best"], T);
 
   // events
   for (const e of w.events) {
@@ -158,13 +189,15 @@ function drawMap() {
   for (const [name, [lat, lon]] of Object.entries(w.targets)) {
     const [x, y] = xy(lat, lon, W, H);
     star(ctx, x, y, 7, agentGot.has(name) ? "#4ade80" : anyGot.has(name) ? "#7cc4ff" : "#f2e6d0");
-    ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.font = "11px Inter, sans-serif";
-    ctx.fillText(name, x + 9, y + 4);
+    if (state.big.has(name) || agentGot.has(name) || anyGot.has(name)) {
+      ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.font = "11px Inter, sans-serif";
+      ctx.fillText(name, x + 9, y + 4);
+    }
   }
 
   // tracks
-  for (const r of RUNS) {
-    const tr = w.runs[r].track;
+  for (const r of runsIn()) {
+    const tr = w.runs[r].track, i = runIdx(r, i0);
     ctx.strokeStyle = COLOR[r]; ctx.lineWidth = r === "agent" || r === "you" ? 2.4 : 1.6;
     ctx.globalAlpha = r === "agent" || r === "you" ? 1 : 0.8;
     ctx.beginPath();
@@ -204,18 +237,19 @@ function star(ctx, x, y, r, fill) {
 // ---------- altitude strip ----------
 function drawStrip() {
   const [ctx, W, H] = fit(stripC);
-  const w = state.world, i = idx(state.T), pad = 28;
+  const w = state.world, i0 = idx(state.T), pad = 28, span = Math.max(totalH(), state.T);
   const [lo, hi] = [48, 64];
-  const X = (h) => pad + (h / totalH()) * (W - pad - 8);
+  const X = (h) => pad + (h / span) * (W - pad - 8);
   const Y = (a) => 8 + (hi - a) / (hi - lo) * (H - 24);
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = "rgba(74,222,128,0.12)";
-  ctx.fillRect(X(0), Y(w.corridor_km[1]), X(totalH()) - X(0), Y(w.corridor_km[0]) - Y(w.corridor_km[1]));
+  ctx.fillRect(X(0), Y(w.corridor_km[1]), X(span) - X(0), Y(w.corridor_km[0]) - Y(w.corridor_km[1]));
   ctx.fillStyle = "#a89c8c"; ctx.font = "10px JetBrains Mono, monospace";
   for (const a of [50, 56, 62]) ctx.fillText(a, 4, Y(a) + 3);
-  for (let d = 0; d <= w.days; d += 2) ctx.fillText(`d${d}`, X(d * 24) - 6, H - 3);
-  for (const r of RUNS) {
-    const tr = w.runs[r].track;
+  const every = span > 40 * 24 ? 10 : 5;
+  for (let d = 0; d <= span / 24; d += every) ctx.fillText(`d${d}`, X(d * 24) - 6, H - 3);
+  for (const r of runsIn()) {
+    const tr = w.runs[r].track, i = runIdx(r, i0);
     ctx.strokeStyle = COLOR[r]; ctx.lineWidth = r === "agent" || r === "you" ? 2 : 1.3;
     ctx.beginPath();
     for (let k = 0; k <= i; k++) {
@@ -230,7 +264,8 @@ function drawStrip() {
 
 // ---------- side panels ----------
 function drawScore() {
-  const cards = [["you", "You"], ["agent", "AI agent"], ["vega", "Vega-style drifter"], ["best", "Best single fixed altitude"]];
+  const cards = [["you", "You"], ["agent", "Gemini ER 2"], ["flash", "Gemini 3.8 Flash"], ["vega", "Vega-style drifter"],
+                 ["best", "Best single fixed altitude"]].filter(([r]) => state.world.runs[r]);
   $("score").innerHTML = cards.map(([r, name]) => {
     const pts = reachedBy(r, state.T).reduce((s, t) => s + valueOf(t), 0);
     return `<div class="card ${r}"><b>${pts}</b><span>${name} points</span></div>`;
@@ -239,25 +274,27 @@ function drawScore() {
 
 function drawLog() {
   const T = state.T, w = state.world;
-  const entries = [...w.runs.agent.log, ...w.runs.you.log].filter((l) => l.t_h <= T).sort((a, b) => a.t_h - b.t_h);
+  const entries = [...ais().flatMap((r) => w.runs[r].log.map((l) => ({ ...l, run: r }))), ...w.runs.you.log.map((l) => ({ ...l, run: "you" }))]
+    .filter((l) => l.t_h <= T).sort((a, b) => a.t_h - b.t_h);
   if (entries.length === state.logCount) return;
   state.logCount = entries.length;
-  const label = { strategy: "strategy", detect: "heard", decision: "decided", reached: "AI reached", missed: "missed", you: "you" };
+  const label = { strategy: "strategy", detect: "heard", decision: "decided", reached: "reached", missed: "missed", you: "you" };
+  const who = { agent: "ER 2", flash: "Flash", you: "" };
   $("log").innerHTML = entries.slice().reverse().map((l) =>
-    `<li class="${l.kind}"><span class="t">day ${hoursToDay(l.t_h)}</span><span class="k">${label[l.kind] || l.kind}</span><br>${escapeHtml(l.text)}${l.kind === "reached" || l.kind === "you" ? ` <b>+${valueOf(l.target)}</b>` : ""}</li>`
+    `<li class="${l.kind}"><span class="t">day ${hoursToDay(l.t_h)}</span><span class="who" style="color:${COLOR[l.run]}">${who[l.run]}</span><span class="k">${label[l.kind] || l.kind}</span><br>${escapeHtml(l.text)}${l.kind === "reached" || l.kind === "you" ? ` <b>+${valueOf(l.target)}</b>` : ""}</li>`
   ).join("") || `<li class="t">Listening…</li>`;
 }
 const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 function drawTable() {
   const rows = state.index.worlds;
-  const tot = (k) => rows.reduce((s, r) => s + r[k], 0);
+  const tot = (k) => rows.reduce((s, r) => s + (r[k] ?? 0), 0);
   $("table").innerHTML =
-    `<tr><th>World</th><th>Agent</th><th>Drifter 54 km</th><th>Average fixed altitude</th><th>Best single fixed altitude</th></tr>` +
+    `<tr><th>World</th><th>Gemini ER 2</th><th>Gemini 3.8 Flash</th><th>Drifter 54 km</th><th>Average fixed altitude</th><th>Best single fixed altitude</th></tr>` +
     rows.map((r) => `<tr class="${r.seed === state.world.seed ? "current" : ""}" data-seed="${r.seed}" style="cursor:pointer">
-      <td>World ${r.seed}</td><td class="${r.agent > r.vega ? "win" : ""}">${r.agent}</td><td>${r.vega}</td><td>${r.avg}</td>
-      <td>${r.best} <span class="note">(${r.best_alt} km)</span></td></tr>`).join("") +
-    `<tr><td><b>Total</b></td><td><b>${tot("agent")}</b></td><td><b>${tot("vega")}</b></td><td><b>${Math.round(tot("avg") * 10) / 10}</b></td><td><b>${tot("best")}</b></td></tr>`;
+      <td>World ${r.seed}</td><td class="${r.agent > r.best ? "win" : ""}">${r.agent}</td><td class="${(r.flash ?? 0) > r.best ? "win" : ""}">${r.flash ?? "–"}</td>
+      <td>${r.vega}</td><td>${r.avg}</td><td>${r.best} <span class="note">(${r.best_alt} km)</span></td></tr>`).join("") +
+    `<tr><td><b>Total</b></td><td><b>${tot("agent")}</b></td><td><b>${tot("flash")}</b></td><td><b>${tot("vega")}</b></td><td><b>${Math.round(tot("avg") * 10) / 10}</b></td><td><b>${tot("best")}</b></td></tr>`;
   $("table").querySelectorAll("tr[data-seed]").forEach((tr) => tr.onclick = () => load(+tr.dataset.seed));
 }
 
@@ -277,17 +314,16 @@ function frame(now) {
   state.last = now;
   if (state.world) {
     if (state.playing) {
-      state.T = Math.min(state.T + dt * state.speed, totalH());
-      if (state.T >= totalH()) setPlaying(false);
+      state.T += dt * state.speed;                   // no end: your flight keeps going
     }
+    state.maxT = Math.max(state.maxT, state.T, totalH());
     syncYou(); drawPilot();
-    $("scrub").value = Math.round(state.T / totalH() * 1000);
-    $("clock").textContent = `day ${hoursToDay(state.T)} of ${state.world.days}`;
+    $("scrub").value = Math.round(state.T / state.maxT * 1000);
+    $("clock").textContent = `day ${hoursToDay(state.T)}` + (state.T > totalH() ? ` · AI flights ended day ${state.world.days}` : "");
     if (flatShown()) drawMap();
     if (globe()) {
       const T = state.T;
-      globe().update(T, idx(T), heardBy(T), new Set([...reachedBy("agent", T), ...reachedBy("you", T)]),
-        new Set([...reachedBy("vega", T), ...reachedBy("best", T)]));
+      globe().update(T, idx(T), heardBy(T), gotBy([...AI, "you"], T), gotBy(["vega", "best"], T));
     }
     drawStrip(); drawScore(); drawLog();
   }
@@ -296,12 +332,14 @@ function frame(now) {
 
 function setPlaying(p) {
   state.playing = p;
-  $("play").textContent = p ? "Pause" : state.T >= totalH() ? "Replay" : "Play";
+  $("play").textContent = p ? "Pause" : "Play";
 }
 
 async function load(seed) {
   state.world = await (await fetch(`data/world${seed}.json`)).json();
-  state.T = 0; state.logCount = -1;
+  state.T = 0; state.maxT = 0; state.logCount = -1;
+  state.gen = { t: state.world.days * 24, n: 0, rand: rng32(state.world.seed * 7919 + 17) };
+  state.big = new Set(Object.entries(state.world.target_size || {}).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k]) => k));
   state.world.runs.you = newYou();
   setAim(56);
   $("world").value = seed;
@@ -324,7 +362,6 @@ async function init() {
     if (e.key === " ") { $("play").click(); e.preventDefault(); }
   });
   $("play").onclick = () => {
-    if (state.T >= totalH()) state.T = 0;
     setPlaying(!state.playing);
   };
   $("view").onclick = () => {
@@ -336,7 +373,7 @@ async function init() {
   };
   $("follow").onclick = () => globe() && globe().setFollow(!globe().follow);
   $("speed").value = String(state.speed);
-  $("scrub").oninput = (e) => { state.T = e.target.value / 1000 * totalH(); state.logCount = -1; };
+  $("scrub").oninput = (e) => { state.T = e.target.value / 1000 * state.maxT; state.logCount = -1; };
   const q = +new URLSearchParams(location.search).get("world");
   await load(state.index.worlds.some((w) => w.seed === q) ? q : 7);   // world 7: the clearest agent win; the table shows all 20
   requestAnimationFrame(frame);

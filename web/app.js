@@ -447,8 +447,12 @@ const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt
 function drawTable() {
   const rows = state.index.worlds;
   const tot = (k) => rows.reduce((s, r) => s + (r[k] ?? 0), 0);
-  const keys = ["hybrid", "agent", "flash", "rules", "vega"], top = Math.max(...keys.map(tot), tot("best"));
+  const RUNCOLS = ["hybrid", "agent", "flash", "rules", "vega", "best"];
+  const top = Math.max(...RUNCOLS.map(tot));
   const cell = (k) => `<td class="${tot(k) === top ? "lead" : ""}"><b>${tot(k)}</b></td>`;
+  // The 5 best single runs across all worlds (ties with 5th place included) get a star.
+  const all = rows.flatMap((r) => RUNCOLS.filter((k) => r[k] != null).map((k) => r[k])).sort((a, b) => b - a);
+  const starAt = all[Math.min(4, all.length - 1)];
   // Under each score: health, ballast and gas left at the finish (or when it was lost).
   const gauge = (r, run) => {
     const e = r.end && r.end[run];
@@ -458,14 +462,31 @@ function drawTable() {
     const bar = (cls, f) => `<i class="${cls}"><u style="width:${Math.round(Math.max(0, Math.min(1, f)) * 100)}%"></u></i>`;
     return `<span class="gauge" title="${tip}">${bar("h", e.h)}${bar("b", e.b / 45)}${bar("g", e.g / 45)}</span>`;
   };
-  const sc = (r, run, val, win) => `<td class="${win ? "win" : ""}">${val ?? "–"}${gauge(r, run)}</td>`;
+  // A score: a coloured pill if it won its world, a star if it's a top-5 run; click to watch it.
+  const sc = (r, run, extra = "") => {
+    const val = r[run];
+    if (val == null) return "<td>–</td>";
+    const best = Math.max(...RUNCOLS.map((k) => r[k] ?? -1));
+    const win = val === best, star = val >= starAt;
+    const num = win ? `<span class="pill" style="background:${COLOR[run]}">${val}</span>` : `${val}`;
+    return `<td class="score-cell" data-seed="${r.seed}" data-run="${run}" title="Watch this run">${star ? '<span class="star">★</span>' : ""}${num}${extra}${gauge(r, run)}</td>`;
+  };
   $("table").innerHTML =
     `<tr><th>World</th><th>Rulebook + Gemini</th><th>Gemini ER 2</th><th>Gemini 3.8 Flash</th><th>Rulebook</th><th>Drifter 54 km</th><th>Average fixed altitude</th><th>Best single fixed altitude</th></tr>` +
     `<tr class="total"><td><b>Total, all ${rows.length} worlds</b></td>${cell("hybrid")}${cell("agent")}${cell("flash")}${cell("rules")}${cell("vega")}<td><b>${Math.round(tot("avg") * 10) / 10}</b></td>${cell("best")}</tr>` +
-    rows.map((r) => `<tr class="${r.seed === state.world.seed ? "current" : ""}" data-seed="${r.seed}" style="cursor:pointer">
-      <td>World ${r.seed}</td>${sc(r, "hybrid", r.hybrid, (r.hybrid ?? 0) > (r.rules ?? 0))}${sc(r, "agent", r.agent, r.agent > r.best)}${sc(r, "flash", r.flash, (r.flash ?? 0) > r.best)}${sc(r, "rules", r.rules, false)}
-      ${sc(r, "vega", r.vega, false)}<td>${r.avg}</td><td>${r.best} <span class="note">(${r.best_alt} km)</span>${gauge(r, "best")}</td></tr>`).join("");
-  $("table").querySelectorAll("tr[data-seed]").forEach((tr) => tr.onclick = () => load(+tr.dataset.seed));
+    rows.map((r) => `<tr class="${r.seed === state.world.seed ? "current" : ""}">
+      <td class="world-cell" data-seed="${r.seed}">World ${r.seed}</td>${sc(r, "hybrid")}${sc(r, "agent")}${sc(r, "flash")}${sc(r, "rules")}
+      ${sc(r, "vega")}<td>${r.avg}</td>${sc(r, "best", ` <span class="note">(${r.best_alt} km)</span>`)}</tr>`).join("");
+  $("table").querySelectorAll("td.world-cell").forEach((td) => td.onclick = () => watch(+td.dataset.seed));
+  $("table").querySelectorAll("td.score-cell").forEach((td) => td.onclick = () => watch(+td.dataset.seed, td.dataset.run));
+}
+
+// Load a world (and optionally follow one balloon, with the director on), then scroll up to the globe.
+async function watch(seed, run) {
+  if (state.world.seed !== seed) await load(seed);
+  if (run) select(run);
+  if (!state.director) $("director").click();
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 // ---------- sound: small volcano effects, made in the browser (no audio files) ----------

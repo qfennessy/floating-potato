@@ -189,3 +189,9 @@ main { margin-top: 16px; }
 .fact:empty { display: none; }
 .venusfacts ul { margin: 0; padding-left: 18px; color: var(--muted); max-width: 90ch; }
 .venusfacts li { margin: 6px 0; }
+
+/* best runs: per-world winner pill, top-5 star, click to watch */
+.summary td.score-cell, .summary td.world-cell { cursor: pointer; }
+.summary td.score-cell:hover, .summary td.world-cell:hover { background: rgba(255,255,255,0.05); }
+.summary .pill { display: inline-block; min-width: 28px; padding: 1px 8px; border-radius: 999px; color: #14110f; font-weight: 700; text-align: center; }
+.summary .star { color: #fde047; margin-right: 4px; }

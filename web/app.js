@@ -170,6 +170,18 @@ function drawMap() {
       if (k === 0 || Math.abs(tr[k][1] - tr[k - 1][1]) > 180) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.stroke(); ctx.globalAlpha = 1;
+    if (r === "you") {                                   // glowing tail: last 6 simulated hours
+      ctx.save();
+      ctx.shadowColor = COLOR.you; ctx.shadowBlur = 12; ctx.lineCap = "round";
+      for (let k = Math.max(1, i - 23); k <= i; k++) {
+        if (Math.abs(tr[k][1] - tr[k - 1][1]) > 180) continue;
+        const f = (k - (i - 24)) / 24;
+        ctx.globalAlpha = f; ctx.lineWidth = 2 + 4 * f; ctx.strokeStyle = COLOR.you;
+        const [x0, y0] = xy(tr[k - 1][0], tr[k - 1][1], W, H), [x1, y1] = xy(tr[k][0], tr[k][1], W, H);
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      }
+      ctx.restore();
+    }
     const [bx, by] = xy(tr[i][0], tr[i][1], W, H);
     ctx.fillStyle = COLOR[r]; ctx.strokeStyle = "#000"; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(bx, by, r === "agent" || r === "you" ? 6 : 4.5, 0, 7); ctx.fill(); ctx.stroke();

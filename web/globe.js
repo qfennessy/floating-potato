@@ -20,6 +20,9 @@ function toXYZ(lat, lon, r) {
 }
 // Altitude 50..62 km -> radius. Real height is under 1% of Venus's radius; exaggerated ~4x so you can see it.
 const altR = (alt) => 1.012 + (alt - 50) / 12 * 0.045;
+const YOU_LIFT = 0.006;      // your path sits just above the others so it is never hidden
+const TAIL = 24;             // glowing tail behind your balloon: last 24 steps = 6 simulated hours
+const TAIL_PIECES = 6;
 
 function starField() {
   const n = 5000, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
@@ -128,7 +131,7 @@ class Globe {
   resize() {
     const w = this.host.clientWidth, h = this.host.clientHeight;
     this.renderer.setSize(w, h);
-    for (const l of Object.values(this.lines || {})) l.material.resolution.set(w, h);
+    for (const l of [...Object.values(this.lines || {}), ...(this.tailPieces || [])]) l.material.resolution.set(w, h);
     this.labels.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -145,7 +148,7 @@ class Globe {
       const g = new LineGeometry();
       g.setPositions(pos);
       const line = new Line2(g, new LineMaterial({
-        color: COLOR[r], linewidth: r === "agent" || r === "you" ? 3 : 2, transparent: true, opacity: r === "agent" || r === "you" ? 1 : 0.8,
+        color: COLOR[r], linewidth: r === "you" ? 4 : r === "agent" ? 3 : 2, transparent: true, opacity: r === "agent" || r === "you" ? 1 : 0.8,
         resolution: new THREE.Vector2(this.host.clientWidth, this.host.clientHeight) }));
       this.dynamic.add(line);
       this.lines[r] = line;
@@ -157,6 +160,18 @@ class Globe {
       ball.add(halo);
       this.dynamic.add(ball);
       this.balloons[r] = ball;
+    }
+    // Your tail: TAIL_PIECES short wide pink pieces, more see-through toward the back.
+    this.tailPieces = [];
+    for (let k = 0; k < TAIL_PIECES; k++) {
+      const f = (k + 1) / TAIL_PIECES;
+      const piece = new Line2(new LineGeometry(), new LineMaterial({
+        color: 0xff7ac8, linewidth: 4 + 6 * f, transparent: true, opacity: 0.12 + 0.6 * f ** 1.5, depthWrite: false,
+        resolution: new THREE.Vector2(this.host.clientWidth, this.host.clientHeight) }));
+      piece.frustumCulled = false;
+      piece.visible = false;
+      this.dynamic.add(piece);
+      this.tailPieces.push(piece);
     }
     this.targets = Object.entries(world.targets).map(([name, [lat, lon]]) => {
       const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.014), new THREE.MeshBasicMaterial({ color: 0xf2e6d0 }));
@@ -185,16 +200,37 @@ class Globe {
       const pos = [];
       for (let k = 0; k < this.world.runs.agent.track.length; k++) {
         const [la, lo, al] = yt[Math.min(k, yt.length - 1)];
-        const p = toXYZ(la, lo, altR(al));
+        const p = toXYZ(la, lo, altR(al) + YOU_LIFT);
         pos.push(p.x, p.y, p.z);
       }
+      // Fresh geometry each time: three.js remembers a wide line's segment count the first time it
+      // draws it, and your path starts as a single point, so growing it in place never shows up.
+      this.lines.you.geometry.dispose();
+      this.lines.you.geometry = new LineGeometry();
       this.lines.you.geometry.setPositions(pos);
+      this.lines.you.frustumCulled = false;
+      // Tail: the last TAIL points split into pieces; the newest piece is the widest and most solid.
+      const per = TAIL / TAIL_PIECES, end = yt.length - 1;
+      this.tailPieces.forEach((piece, k) => {
+        const a = end - (TAIL_PIECES - k) * per, b = a + per;      // piece k covers points a..b
+        if (b < 1) { piece.visible = false; return; }
+        const pts = [];
+        for (let m = Math.max(a, 0); m <= b; m++) {
+          const [la, lo, al] = yt[m], p = toXYZ(la, lo, altR(al) + YOU_LIFT * 1.5);
+          pts.push(p.x, p.y, p.z);
+        }
+        piece.visible = pts.length >= 6;
+        if (!piece.visible) return;
+        piece.geometry.dispose();
+        piece.geometry = new LineGeometry();
+        piece.geometry.setPositions(pts);
+      });
     }
     for (const r of RUNS) {
       const track = this.world.runs[r].track, j = Math.min(i, track.length - 1);
       this.lines[r].geometry.instanceCount = Math.max(j, 1);   // Line2 draws one segment per instance
       const [lat, lon, alt] = track[j];
-      this.balloons[r].position.copy(toXYZ(lat, lon, altR(alt)));
+      this.balloons[r].position.copy(toXYZ(lat, lon, altR(alt) + (r === "you" ? YOU_LIFT : 0)));
     }
     for (const t of this.targets)
       t.mesh.material.color.set(agentGot.has(t.name) ? 0x4ade80 : anyGot.has(t.name) ? 0x7cc4ff : 0xf2e6d0);

@@ -40,6 +40,35 @@ The constraint that makes it interesting: the balloon lives in a narrow corridor
 
 Keep the physics simple: altitude changes at a fixed rate per step, and horizontal motion equals the wind at the current altitude. Nobody will judge buoyancy equations; they will judge whether the agent makes smart choices.
 
+## Sensors
+
+Two ways to add sensors. The science sensors are planned for today. Navigation without GPS is a stretch goal.
+
+### Science sensors (today, about an hour)
+
+The real Vega balloons measured temperature, pressure, light, and cloud particles. Newer Venus balloon ideas add a gas sniffer (for example, sulfur dioxide) and a microphone for very low sounds, which could pick up venusquakes or eruptions.
+
+In the sim, a sudden reading creates a new target partway through the flight: "sulfur dioxide spike 300 km south", or "low rumble, maybe Maat Mons". The commander decides whether to chase it or stick with the plan, and explains why in the log. This uses the surprise target already in the plan.
+
+Build: a small event generator in the sim, one new tool (`report_event`) shown to the commander, and markers on the map that pop up and then fade.
+
+### Navigation without GPS (stretch)
+
+Venus has no GPS, and the balloon flies inside the clouds, so it can't see the stars. It has to estimate where it is. Ways to do that, from cheapest to fanciest:
+
+| Method | What it tells you | Catch |
+|---|---|---|
+| Pressure sensor | Altitude, very accurately | Altitude only |
+| Light sensor | Local time of day, so roughly how far east or west you are of the noon point | Rough, and useless at night |
+| Counting from the last fix (speed × time) | A best guess that keeps going | The guess drifts more every hour |
+| Radio tracking from Earth or an orbiter | A good position (this is how Vega was tracked) | Worked out far away and arrives late |
+| Infrared camera at night | Blurry shapes of the ground, matched against the Magellan map | Needs a smart image reader, which is the Gemini Robotics-ER job |
+| Downward radar | The height of the ground below, matched against Magellan elevation | Extra hardware and weight |
+
+**How do we know we reached a target?** The balloon never knows for certain. It carries a best guess plus a circle of doubt that grows between fixes. It *claims* a target when its whole circle of doubt fits inside the target's capture radius. Later, radio tracking from Earth confirms or denies the claim. For science targets, the instruments can also confirm it: the infrared camera sees the volcano, or the gas sniffer smells the plume.
+
+In the sim, the true position stays hidden from the agent. The agent sees only its guess. The map shows the doubt circle shrinking each time a fix arrives. The scoreboard counts a target only if the true position was inside the radius, and counts wrong claims against the agent. This tests whether the commander knows when to spend time on a fix, for example waiting for night to take an infrared picture, before claiming a target.
+
 ## Controllers
 
 The commander decides where to go; a search-based planner decides how. Keeping the model out of the step-by-step control is deliberate: it is slow and imprecise at that, but good at weighing goals, reading a map, and explaining choices.

@@ -12,6 +12,25 @@ Why it matters: Venus's surface is 460 °C and 90 atmospheres, so landers die in
 
 Win condition for the demo: the agent reaches more targets in the same number of Earth days than a balloon that rides one altitude around the planet.
 
+## Current state (Oct 11, 12:10)
+
+Team: one human (Q) and Claude Code.
+
+| Piece | State | Where |
+|---|---|---|
+| Simulator | Working. Our own plain numpy sim, not Google's Balloon Learning Environment (it is built for Earth; see Prep) | `sim/venus.py` |
+| Winds | Made-up layered winds that match the plan. Real Venus Climate Database winds not pulled yet | `sim/venus.py` |
+| Planner | Working. Tries a few hundred altitude plans 5 days ahead, every 6 hours | `sim/planner.py` |
+| Science sensor events | Working. Eruptions, gas plumes and lightning appear; the commander chases or ignores each one | `sim/events.py`, `sim/mission.py` |
+| Commander | Rule version working. Gemini Robotics-ER version written, answers tool calls, not yet run through a whole mission | `sim/commander.py` |
+| Replay files | Each run saves a JSON with the track, events and log | `runs/` (made by `sim/mission.py`) |
+| Demo website | Not started | |
+| Pitch sketch | Done | `docs/pitch_sketch.png` |
+
+**Scoreboard, 5 random worlds, 10 Earth days each (points):** agent 24, Vega-style drifter at 54 km 5, best fixed altitudes 30 (50.5 km) and 28 (58 km). The agent clearly beats Vega but not the best fixed altitude yet. Why: early on it chases Beta Regio north and misses the volcano cluster near the equator, where most eruptions happen. A drifter at 50.5 km slides toward the equator by luck.
+
+Run it: `uv run --with numpy python sim/mission.py --seed 1` (add `--gemini` for the Gemini commander).
+
 ## The simple version
 
 **The simulator** is a pretend Venus with a balloon on it. The wind on Venus is like a giant conveyor belt that always pushes the balloon west. The balloon can't steer. It can only go up or down. Higher up, the belt runs faster. Lower down, it runs slower. The wind also nudges the balloon a little north or south, and up high it pushes the opposite way from down low.
@@ -94,8 +113,8 @@ The drifter flies the same sim at a fixed altitude, so the comparison is fair, a
 
 ## Shortcuts and data sources
 
-- **Simulator:** fork Google's open-source Balloon Learning Environment (Python, gym-style, from the Loon work) and replace Earth's wind with Venus winds. If it fights you by 13:00, drop it and write a plain 2D sim, about 100 lines of numpy.
-- **Winds:** the Venus Climate Database (the LMD group's Venus counterpart of the Mars Climate Database, current release v2.3) gives wind profiles by altitude, latitude, and local time. Pull a small table on Saturday: a few latitudes × 8 altitude bands × 12 local times. Fallback: synthetic winds with zonal speed rising from 60 to 100 m/s across the corridor, a few m/s poleward at the cloud top, equatorward near the base. Sanity-check against the published Vega balloon tracks.
+- **Simulator:** our own plain 2D numpy sim in `sim/venus.py`. We tried Google's open-source Balloon Learning Environment first and dropped it: it installs, but it is built around one spot on Earth, Earth air pressure, and a score for staying near home.
+- **Winds:** the Venus Climate Database (the LMD group's Venus counterpart of the Mars Climate Database, current release v2.3) gives wind profiles by altitude, latitude, and local time. Not pulled yet; a small table would be a few latitudes × 8 altitude bands × 12 local times. In use now: synthetic winds with zonal speed rising from 60 to 100 m/s across the corridor, a few m/s poleward at the cloud top, equatorward near the base. Sanity-check against the published Vega balloon tracks.
 - **Map:** a Magellan radar mosaic as the background.
 - **Targets:** real sites so the story lands: Maxwell Montes (the highest peak), Maat Mons (the volcano that was caught changing shape in Magellan data), Alpha Regio (where NASA's DAVINCI probe is headed), Ovda Regio in Aphrodite Terra, plus one "surprise" target (for example a fresh sulfur-dioxide plume) that the commander can choose to chase.
 - **Commander:** Gemini API key from Google AI Studio; confirm `gemini-robotics-er-2-preview` answers a tool call before Sunday. Keep the same tool schema so the planner never cares which model is behind it.
@@ -115,7 +134,7 @@ Pitch arc: the problem (Venus kills landers, the clouds are the only place to li
 
 ## Team and timeline
 
-Ideal team is 3–4 people. If you're short, the frontend person also takes the commander.
+Planned for 3–4 people. Actual team: Q plus Claude Code, so one person covers every role below.
 
 | Role | Owns | Done when |
 |---|---|---|
@@ -149,9 +168,9 @@ If the 16:00 run/bike tempts you, take it only if the planner already works.
 
 | Risk | Fallback |
 |---|---|
-| Balloon Learning Environment takes too long to adapt | Plain 2D numpy sim |
-| No usable Venus wind data | Synthetic layered winds tuned to the Vega profile |
-| Planner doesn't beat the drifter | Tune target latitudes so altitude choice clearly matters |
+| Balloon Learning Environment takes too long to adapt | Happened. Using the plain 2D numpy sim |
+| No usable Venus wind data | In use: synthetic layered winds tuned to the Vega profile |
+| Planner doesn't beat the drifter | Half happened: beats Vega's 54 km, not the best fixed altitude. Next: tune targets or the planner's early choices |
 | Gemini Robotics-ER 2 preview is rate-limited or flaky live | Same tool schema on a general Gemini model; replay logged decisions from precomputed runs |
 
 **Questions for Alejandro Carrasco Aragón** (guest speaker, MIT AeroAstro; talk at 11:00)

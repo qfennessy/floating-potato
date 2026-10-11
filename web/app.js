@@ -439,8 +439,19 @@ function drawLog() {
                   message: "mission control", arrived: "arrived" };
   const who = { agent: "ER 2", flash: "Flash", hybrid: "Hybrid", you: "", mc: "" };
   $("log").innerHTML = entries.slice().reverse().map((l) =>
-    `<li class="${l.kind}"><span class="t">day ${hoursToDay(l.t_h)}</span><span class="who" style="color:${COLOR[l.run]}">${who[l.run]}</span><span class="k">${label[l.kind] || l.kind}</span><br>${escapeHtml(l.text)}${l.kind === "reached" || l.kind === "you" ? ` <b>+${l.pts ?? valueOf(l.target)}</b>` : ""}</li>`
+    `<li class="${l.kind}"><span class="t">day ${hoursToDay(l.t_h)}</span><span class="who" style="color:${COLOR[l.run]}">${who[l.run]}</span><span class="k">${label[l.kind] || l.kind}</span><br>${escapeHtml(plain(l.text))}${l.kind === "reached" || l.kind === "you" ? ` <b>+${l.pts ?? valueOf(l.target)}</b>` : ""}</li>`
   ).join("") || `<li class="t">Listening…</li>`;
+}
+// Older data carries the rulebook's terse internal wording; show it in plain words.
+function plain(t) {
+  return t
+    .replace(/Cruising in the lane (\d+)([NS]) lane: the most still to see for the travel time\.?/,
+             "Staying near $1°$2: the most places left to visit for the time it takes to get there.")
+    .replace(/No lane has enough unvisited sites left, so roaming to sweep up new ones\./,
+             "No band of latitude has enough unvisited places left, so wandering to find new ones.")
+    .replace(/Last (\d+) days: surviving past day (\d+) is worth nothing, so sprint through the risky fast layers\./,
+             "Last $1 days: nothing counts after day $2, so it's worth risking the dangerous heights now.")
+    .replace(/\blane (\d+)([NS])\b/g, "$1°$2");
 }
 const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -683,7 +694,7 @@ function drawDecision() {
   else {
     const last = w.runs[r].log.filter((l) => l.kind === "strategy" && l.t_h <= state.T).pop();
     const name = { agent: "ER 2", flash: "Flash", rules: "Rulebook", hybrid: "Rules + Gemini" }[r];
-    const one = last ? last.text.replace(/^(Autopilot|Gemini \([^)]*\)): /, "").split(/(?<=[.!?])\s/)[0] : "Launching.";
+    const one = last ? plain(last.text.replace(/^(Autopilot|Gemini \([^)]*\)): /, "")).split(/(?<=[.!?])\s/)[0] : "Launching.";
     text = `<b style="color:${COLOR[r]}">${name}:</b> ${escapeHtml(one)}`;
   }
   if (el.dataset.html !== text) { el.innerHTML = text; el.dataset.html = text; }

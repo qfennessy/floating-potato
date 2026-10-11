@@ -95,15 +95,16 @@ def rule_strategist(st, view):
     one-time sites, a lane runs dry after a lap or two, and roaming sweeps up new ones."""
     cur = view.get("lane")
     if view["days"] - st.hours / 24 <= SPRINT_DAYS:
-        return roam_choice(view, f"Last {SPRINT_DAYS:g} days: surviving past day {view['days']:g} is worth nothing, "
-                                 "so sprint through the risky fast layers.", sprint=True)
+        return roam_choice(view, f"Last {SPRINT_DAYS:g} days: nothing counts after day {view['days']:g}, "
+                                 "so it's worth risking the dangerous heights now.", sprint=True)
     best = max(LANES, key=lambda l: lane_worth(l, st, view, cur))
     in_reach = sum(abs(TARGETS[t][0] - LANES[best]) <= REACH_DEG for t in view["unvisited"])
     if in_reach < 3:
-        return roam_choice(view, "No lane has enough unvisited sites left, so roaming to sweep up new ones.")
+        return roam_choice(view, "No band of latitude has enough unvisited places left, so wandering to find new ones.")
     if cur in LANES and lane_worth(best, st, view, cur) <= SWITCH_MARGIN * lane_worth(cur, st, view, cur):
         best = cur
-    return lane_choice(best, view, f"Cruising in the {best} lane: the most still to see for the travel time.")
+    where = best.replace("lane ", "")
+    return lane_choice(best, view, f"Staying near {where[:-1]}°{where[-1]}: the most places left to visit for the time it takes to get there.")
 
 
 def render_map(st, view, px=1024):

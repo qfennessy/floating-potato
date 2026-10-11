@@ -31,3 +31,6 @@ dist/
 
 # Per-model export parts (assembled into web/data/world*.json)
 web/data/parts/
+
+# Scratch output of sim runs (the website uses web/data instead)
+runs/

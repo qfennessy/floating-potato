@@ -7,8 +7,8 @@ import { Line2 } from "three/addons/lines/Line2.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 
-const COLOR = { agent: 0xffb347, vega: 0xd8d8d8, best: 0x7cc4ff };
-const RUNS = ["best", "vega", "agent"];
+const COLOR = { agent: 0xffb347, vega: 0xd8d8d8, best: 0x7cc4ff, you: 0xf472b6 };
+const RUNS = ["best", "vega", "agent", "you"];
 const KIND = { rumble: "eruption", so2: "gas plume", lightning: "lightning" };
 
 // lat/lon (deg, lon 0..360 E) -> point on a sphere, matching three's SphereGeometry UVs so the
@@ -137,7 +137,7 @@ class Globe {
   load(world) {
     this.world = world;
     this.dynamic.clear();
-    this.lines = {}; this.balloons = {};
+    this.lines = {}; this.balloons = {}; this.youLen = -1;
     for (const r of RUNS) {
       const tr = world.runs[r].track;
       const pos = [];
@@ -145,14 +145,15 @@ class Globe {
       const g = new LineGeometry();
       g.setPositions(pos);
       const line = new Line2(g, new LineMaterial({
-        color: COLOR[r], linewidth: r === "agent" ? 3 : 2, transparent: true, opacity: r === "agent" ? 1 : 0.8,
+        color: COLOR[r], linewidth: r === "agent" || r === "you" ? 3 : 2, transparent: true, opacity: r === "agent" || r === "you" ? 1 : 0.8,
         resolution: new THREE.Vector2(this.host.clientWidth, this.host.clientHeight) }));
       this.dynamic.add(line);
       this.lines[r] = line;
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(r === "agent" ? 0.018 : 0.013, 16, 16),
+      const big = r === "agent" || r === "you";
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(big ? 0.018 : 0.013, 16, 16),
         new THREE.MeshBasicMaterial({ color: COLOR[r] }));
       const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: COLOR[r], transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending }));
-      halo.scale.setScalar(r === "agent" ? 0.09 : 0.06);
+      halo.scale.setScalar(big ? 0.09 : 0.06);
       ball.add(halo);
       this.dynamic.add(ball);
       this.balloons[r] = ball;
@@ -177,9 +178,22 @@ class Globe {
   update(T, i, heard, agentGot, anyGot) {
     if (!this.world) return;
     this.T = T;
+    // Your track grows live: refresh its line when it gets longer or is rewound.
+    const yt = this.world.runs.you.track;
+    if (yt.length !== this.youLen) {
+      this.youLen = yt.length;
+      const pos = [];
+      for (let k = 0; k < this.world.runs.agent.track.length; k++) {
+        const [la, lo, al] = yt[Math.min(k, yt.length - 1)];
+        const p = toXYZ(la, lo, altR(al));
+        pos.push(p.x, p.y, p.z);
+      }
+      this.lines.you.geometry.setPositions(pos);
+    }
     for (const r of RUNS) {
-      this.lines[r].geometry.instanceCount = Math.max(i, 1);   // Line2 draws one segment per instance
-      const [lat, lon, alt] = this.world.runs[r].track[i];
+      const track = this.world.runs[r].track, j = Math.min(i, track.length - 1);
+      this.lines[r].geometry.instanceCount = Math.max(j, 1);   // Line2 draws one segment per instance
+      const [lat, lon, alt] = track[j];
       this.balloons[r].position.copy(toXYZ(lat, lon, altR(alt)));
     }
     for (const t of this.targets)
@@ -197,9 +211,9 @@ class Globe {
   }
 
   render() {
-    if (this.follow && this.balloons && this.balloons.agent.position.lengthSq() > 0.5) {
+    if (this.follow && this.balloons && this.balloons.you.position.lengthSq() > 0.5) {
       // Glide the camera to sit above the agent, a little behind it (east, since it flies west).
-      const b = this.balloons.agent.position.clone().normalize();
+      const b = this.balloons.you.position.clone().normalize();
       const east = new THREE.Vector3(0, 1, 0).cross(b).normalize().negate();
       const want = b.clone().multiplyScalar(3.3).add(east.multiplyScalar(0.9)).add(new THREE.Vector3(0, 0.5, 0));
       this.camera.position.lerp(want, 0.04);

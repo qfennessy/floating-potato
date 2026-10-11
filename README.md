@@ -26,6 +26,7 @@ Team: one human (Q) and Claude Code.
 | Lane holding | Between chases, the balloon holds the chosen latitude by going up (drifts poleward) or down (drifts toward the equator) | `sim/mission.py` |
 | Science sensor events | Eruptions, gas plumes and lightning appear; the balloon only hears nearby ones. It chases only events it can reach within 6 hours | `sim/events.py`, `sim/commander.py` |
 | Planner | Flies the chases: tries a few hundred altitude plans ahead and keeps the best | `sim/planner.py` |
+| Fly it yourself | On the website you fly a pink balloon live: a slider or the arrow keys set its altitude, and a JavaScript copy of the simulator moves it (matches the Python sim within 1 km over a whole mission). You race the AI agent's replay in the same world, and dragging the timeline back rewinds your flight | `web/app.js` |
 | Demo website | Live on Vercel. Replays saved runs, so it can't crash on stage. Rebuild data with `uv run --with numpy --with pillow --with matplotlib python sim/export_web.py --gemini`, then push to `main`: Vercel deploys `web/` on every push | `web/` |
 | Pitch sketch | Done (from an earlier version of the agent) | `docs/pitch_sketch.png` |
 

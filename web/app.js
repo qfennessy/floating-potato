@@ -1,13 +1,14 @@
-// Replays precomputed runs (web/data/world<N>.json, made by sim/export_web.py).
+// Replays precomputed runs (web/data/world<N>.json, made by sim/export_web.py) and flies YOUR
+// balloon live in the same world: you set the altitude, the same physics as sim/venus.py moves it.
 // No live model calls, so the demo can't crash on stage.
 
-const RUNS = ["best", "vega", "agent"];               // draw order: agent on top
-const COLOR = { agent: "#ffb347", vega: "#c9c9c9", best: "#7cc4ff" };
+const RUNS = ["best", "vega", "agent", "you"];        // draw order: you on top
+const COLOR = { agent: "#ffb347", vega: "#c9c9c9", best: "#7cc4ff", you: "#f472b6" };
 const KIND = { rumble: "eruption", so2: "gas plume", lightning: "lightning" };
 
 const $ = (id) => document.getElementById(id);
 const mapC = $("map"), stripC = $("strip");
-const state = { world: null, T: 0, playing: true, speed: 5, last: 0, logCount: -1, index: null };
+const state = { world: null, T: 0, playing: true, speed: 2, last: 0, logCount: -1, index: null, aim: 56 };
 const basemap = new Image();
 basemap.src = "data/venus_0_360.jpg";
 
@@ -31,10 +32,80 @@ function valueOf(target) {
   return ev ? ev.value : 1;
 }
 function reachedBy(run, T) {
-  return state.world.runs[run].log.filter((l) => l.kind === "reached" && l.t_h <= T).map((l) => l.target);
+  return state.world.runs[run].log.filter((l) => (l.kind === "reached" || l.kind === "you") && l.t_h <= T).map((l) => l.target);
 }
 function heardBy(T) {
   return new Set(state.world.runs.agent.log.filter((l) => l.kind === "detect" && l.t_h <= T).map((l) => l.event));
+}
+
+// ---------- live physics: a port of sim/venus.py (keep the two in step) ----------
+const R_KM = 6051.8, KM_PER_DEG = Math.PI * R_KM / 180, STEP_S = 900, ALT_RATE = 0.5;
+const CORRIDOR = [50, 62], SOLAR_DAY_H = 116.75 * 24, CAPTURE_KM = 350;
+const rad = (d) => d * Math.PI / 180;
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const mod = (x, m) => ((x % m) + m) % m;
+
+function wind(lat, alt, lt) {
+  const s = (alt - CORRIDOR[0]) / (CORRIDOR[1] - CORRIDOR[0]);
+  const u = -(60 + 40 * s) * Math.cos(rad(lat)) + 4 * Math.cos(2 * Math.PI * lt / 24);
+  const v = 6 * (2 * s - 1) * Math.sin(2 * rad(lat)) + 2 * Math.sin(2 * Math.PI * lt / 24) * (2 * s - 1);
+  return [u, v];
+}
+const localTime = (lon, hours) => mod(12 + (lon - mod(-360 * hours / SOLAR_DAY_H, 360)) / 15, 24);
+function gcKm(lat1, lon1, lat2, lon2) {
+  const p1 = rad(lat1), p2 = rad(lat2), dl = rad(lon2 - lon1);
+  const a = Math.sin((p2 - p1) / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return 2 * R_KM * Math.asin(Math.sqrt(clamp(a, 0, 1)));
+}
+// One 15-minute step from [lat, lon, alt] at `hours`, climbing or sinking toward `aim`.
+function advance([lat, lon, alt], hours, aim) {
+  const action = Math.sign(Math.round((aim - alt) * 1000) / 1000);
+  alt = clamp(alt + action * ALT_RATE, ...CORRIDOR);
+  const [u, v] = wind(lat, alt, localTime(lon, hours));
+  const dlat = v * STEP_S / 1000 / KM_PER_DEG;
+  const dlon = u * STEP_S / 1000 / (KM_PER_DEG * Math.max(Math.cos(rad(lat)), 0.05));
+  return [clamp(lat + dlat, -85, 85), mod(lon + dlon, 360), alt];
+}
+
+// Your flight is stored like a replayed run (track + log), grown or rewound to match the clock.
+function newYou() {
+  const [lat, lon] = state.world.runs.agent.track[0];
+  return { label: "You", track: [[lat, lon, 56]], log: [], aims: [] };
+}
+function syncYou() {
+  const you = state.world.runs.you, want = idx(state.T);
+  if (you.track.length - 1 > want) {                           // scrubbed back: rewind
+    you.track.length = want + 1;
+    you.aims.length = want;
+    you.log = you.log.filter((l) => l.t_h <= want * state.world.step_h);
+  }
+  while (you.track.length - 1 < want) {
+    const k = you.track.length - 1, hours = k * state.world.step_h;
+    const active = state.world.events.filter((e) => e.t_h <= hours && hours < e.ends_h);
+    const next = advance(you.track[k], hours, state.aim);
+    you.track.push(next);
+    you.aims.push(state.aim);
+    const got = new Set(you.log.map((l) => l.target));
+    const cands = [...Object.entries(state.world.targets).map(([n, [la, lo]]) => [n, la, lo, n]),
+                   ...active.map((e) => [e.id, e.lat, e.lon, `${KIND[e.kind]}${e.site ? " near " + e.site : ""}`])];
+    for (const [id, la, lo, name] of cands)
+      if (!got.has(id) && gcKm(next[0], next[1], la, lo) <= CAPTURE_KM)
+        you.log.push({ t_h: hours + state.world.step_h, kind: "you", target: id, text: `You reached ${name}` });
+  }
+}
+function setAim(a) {
+  state.aim = clamp(Math.round(a * 2) / 2, ...CORRIDOR);
+  $("aim").value = state.aim;
+  drawPilot();
+}
+function drawPilot() {
+  const you = state.world?.runs.you;
+  if (!you) return;
+  const [lat, lon, alt] = you.track[you.track.length - 1];
+  const [u, v] = wind(lat, alt, localTime(lon, state.T));
+  const ns = Math.abs(v) < 0.5 ? "no north-south drift" : `drifting ${v > 0 ? "north" : "south"} ${Math.abs(v).toFixed(1)} m/s`;
+  $("aimval").textContent = `${state.aim.toFixed(1)} km`;
+  $("pilotread").textContent = `Now ${alt.toFixed(1)} km at ${lat.toFixed(1)}°, ${lon.toFixed(0)}°E · west ${(-u).toFixed(0)} m/s · ${ns}`;
 }
 
 // ---------- map ----------
@@ -91,8 +162,8 @@ function drawMap() {
   // tracks
   for (const r of RUNS) {
     const tr = w.runs[r].track;
-    ctx.strokeStyle = COLOR[r]; ctx.lineWidth = r === "agent" ? 2.4 : 1.6;
-    ctx.globalAlpha = r === "agent" ? 1 : 0.8;
+    ctx.strokeStyle = COLOR[r]; ctx.lineWidth = r === "agent" || r === "you" ? 2.4 : 1.6;
+    ctx.globalAlpha = r === "agent" || r === "you" ? 1 : 0.8;
     ctx.beginPath();
     for (let k = 0; k <= i; k++) {
       const [x, y] = xy(tr[k][0], tr[k][1], W, H);
@@ -101,7 +172,7 @@ function drawMap() {
     ctx.stroke(); ctx.globalAlpha = 1;
     const [bx, by] = xy(tr[i][0], tr[i][1], W, H);
     ctx.fillStyle = COLOR[r]; ctx.strokeStyle = "#000"; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(bx, by, r === "agent" ? 6 : 4.5, 0, 7); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(bx, by, r === "agent" || r === "you" ? 6 : 4.5, 0, 7); ctx.fill(); ctx.stroke();
   }
 }
 
@@ -130,7 +201,7 @@ function drawStrip() {
   for (let d = 0; d <= w.days; d += 2) ctx.fillText(`d${d}`, X(d * 24) - 6, H - 3);
   for (const r of RUNS) {
     const tr = w.runs[r].track;
-    ctx.strokeStyle = COLOR[r]; ctx.lineWidth = r === "agent" ? 2 : 1.3;
+    ctx.strokeStyle = COLOR[r]; ctx.lineWidth = r === "agent" || r === "you" ? 2 : 1.3;
     ctx.beginPath();
     for (let k = 0; k <= i; k++) {
       const x = X(k * w.step_h), y = Y(tr[k][2]);
@@ -144,7 +215,7 @@ function drawStrip() {
 
 // ---------- side panels ----------
 function drawScore() {
-  const cards = [["agent", "Agent"], ["vega", "Vega-style drifter"], ["best", "Best fixed altitude"]];
+  const cards = [["you", "You"], ["agent", "AI agent"], ["vega", "Vega-style drifter"], ["best", "Best fixed altitude"]];
   $("score").innerHTML = cards.map(([r, name]) => {
     const pts = reachedBy(r, state.T).reduce((s, t) => s + valueOf(t), 0);
     return `<div class="card ${r}"><b>${pts}</b><span>${name} points</span></div>`;
@@ -153,12 +224,12 @@ function drawScore() {
 
 function drawLog() {
   const T = state.T, w = state.world;
-  const entries = w.runs.agent.log.filter((l) => l.t_h <= T);
+  const entries = [...w.runs.agent.log, ...w.runs.you.log].filter((l) => l.t_h <= T).sort((a, b) => a.t_h - b.t_h);
   if (entries.length === state.logCount) return;
   state.logCount = entries.length;
-  const label = { strategy: "strategy", detect: "heard", decision: "decided", reached: "reached", missed: "missed" };
+  const label = { strategy: "strategy", detect: "heard", decision: "decided", reached: "AI reached", missed: "missed", you: "you" };
   $("log").innerHTML = entries.slice().reverse().map((l) =>
-    `<li class="${l.kind}"><span class="t">day ${hoursToDay(l.t_h)}</span><span class="k">${label[l.kind] || l.kind}</span><br>${escapeHtml(l.text)}${l.kind === "reached" ? ` <b>+${valueOf(l.target)}</b>` : ""}</li>`
+    `<li class="${l.kind}"><span class="t">day ${hoursToDay(l.t_h)}</span><span class="k">${label[l.kind] || l.kind}</span><br>${escapeHtml(l.text)}${l.kind === "reached" || l.kind === "you" ? ` <b>+${valueOf(l.target)}</b>` : ""}</li>`
   ).join("") || `<li class="t">Listening…</li>`;
 }
 const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -181,7 +252,7 @@ function globeLoad() { if (globe() && state.world) globe().load(state.world); }
 document.addEventListener("globe-ready", globeLoad);
 document.addEventListener("globe-follow", (e) => {
   $("follow").classList.toggle("on", e.detail);
-  $("follow").textContent = e.detail ? "Following" : "Follow agent";
+  $("follow").textContent = e.detail ? "Following you" : "Follow you";
 });
 function flatShown() { return !document.querySelector(".mapwrap").hidden; }
 
@@ -194,12 +265,13 @@ function frame(now) {
       state.T = Math.min(state.T + dt * state.speed, totalH());
       if (state.T >= totalH()) setPlaying(false);
     }
+    syncYou(); drawPilot();
     $("scrub").value = Math.round(state.T / totalH() * 1000);
     $("clock").textContent = `day ${hoursToDay(state.T)} of ${state.world.days}`;
     if (flatShown()) drawMap();
     if (globe()) {
       const T = state.T;
-      globe().update(T, idx(T), heardBy(T), new Set(reachedBy("agent", T)),
+      globe().update(T, idx(T), heardBy(T), new Set([...reachedBy("agent", T), ...reachedBy("you", T)]),
         new Set([...reachedBy("vega", T), ...reachedBy("best", T)]));
     }
     drawStrip(); drawScore(); drawLog();
@@ -215,6 +287,8 @@ function setPlaying(p) {
 async function load(seed) {
   state.world = await (await fetch(`data/world${seed}.json`)).json();
   state.T = 0; state.logCount = -1;
+  state.world.runs.you = newYou();
+  setAim(56);
   $("world").value = seed;
   $("who").textContent = `Commander: ${state.world.commander}. Lines appear as the mission clock passes them.`;
   drawTable(); globeLoad(); setPlaying(true);
@@ -225,6 +299,15 @@ async function init() {
   $("world").innerHTML = state.index.worlds.map((w) => `<option value="${w.seed}">World ${w.seed}</option>`).join("");
   $("world").onchange = (e) => load(+e.target.value);
   $("speed").onchange = (e) => state.speed = +e.target.value;
+  $("aim").oninput = (e) => setAim(+e.target.value);
+  $("up").onclick = () => setAim(state.aim + 1);
+  $("down").onclick = () => setAim(state.aim - 1);
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT" && e.target.type !== "range") return;
+    if (e.key === "ArrowUp") { setAim(state.aim + 0.5); e.preventDefault(); }
+    if (e.key === "ArrowDown") { setAim(state.aim - 0.5); e.preventDefault(); }
+    if (e.key === " ") { $("play").click(); e.preventDefault(); }
+  });
   $("play").onclick = () => {
     if (state.T >= totalH()) state.T = 0;
     setPlaying(!state.playing);
@@ -237,6 +320,7 @@ async function init() {
     $("follow").hidden = flat;
   };
   $("follow").onclick = () => globe() && globe().setFollow(!globe().follow);
+  $("speed").value = String(state.speed);
   $("scrub").oninput = (e) => { state.T = e.target.value / 1000 * totalH(); state.logCount = -1; };
   const q = +new URLSearchParams(location.search).get("world");
   await load(state.index.worlds.some((w) => w.seed === q) ? q : 3);

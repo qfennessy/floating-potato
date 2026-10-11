@@ -7,6 +7,7 @@
   --agent: #ffb347;
   --vega: #c9c9c9;
   --best: #7cc4ff;
+  --you: #f472b6;
   --event: #f87171;
   --heard: #fde047;
   --good: #4ade80;
@@ -27,6 +28,7 @@ header { display: flex; gap: 24px; justify-content: space-between; align-items: 
 .score .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; min-width: 120px; }
 .score .card b { display: block; font: 600 28px/1.1 "JetBrains Mono", monospace; }
 .score .card span { font-size: 12px; color: var(--muted); }
+.score .you b { color: var(--you); }
 .score .agent b { color: var(--agent); }
 .score .vega b { color: var(--vega); }
 .score .best b { color: var(--best); }
@@ -40,6 +42,10 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; }
 .glabel { font: 600 11px Inter, sans-serif; color: #fff; text-shadow: 0 0 4px #000, 0 0 2px #000; white-space: nowrap; pointer-events: none; transition: opacity .2s; transform: translateY(-10px); }
 .glabel.event { color: var(--heard); }
 @media (max-width: 600px) { .globe { aspect-ratio: 1 / 1; } }
+.pilot { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--you); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.pilot input[type=range] { flex: 1; min-width: 140px; accent-color: var(--you); }
+.pilot #aimval { color: var(--you); min-width: 64px; }
+.pilot .note { flex-basis: 100%; margin: 0; }
 button.on { border-color: var(--agent); color: var(--agent); }
 .mapwrap { background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 canvas { display: block; width: 100%; }
@@ -56,6 +62,7 @@ button:hover { border-color: var(--agent); }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
 .legend span { display: flex; gap: 6px; align-items: center; }
 .sw { display: inline-block; width: 18px; height: 3px; border-radius: 2px; }
+.sw.you { background: var(--you); }
 .sw.agent { background: var(--agent); } .sw.vega { background: var(--vega); } .sw.best { background: var(--best); }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid; }
 .dot.ev { border-color: var(--event); } .dot.heard { border-color: var(--heard); }
@@ -66,6 +73,7 @@ aside { background: var(--panel); border: 1px solid var(--line); border-radius: 
 .log li .t { font: 12px "JetBrains Mono", monospace; color: var(--muted); }
 .log li .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; margin-left: 6px; }
 .log li.strategy .k { color: var(--best); }
+.log li.you .k { color: var(--you); }
 .log li.detect .k { color: var(--heard); }
 .log li.decision .k { color: var(--agent); }
 .log li.reached .k { color: var(--good); }

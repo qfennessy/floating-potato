@@ -4,6 +4,33 @@ Built at [Sundai Club](https://www.sundai.club) · [Hack 144 — Autonomous Spac
 
 Created 2026-10-07 · Last edited 2026-10-11
 
+**AI pilots, a simple rulebook and you race balloons around Venus, steering only by choosing which altitude's wind to ride.**
+
+Live demo: https://venus-balloon-navigator.vercel.app
+
+## About
+
+**What it is.** A balloon on Venus can't steer, but the wind changes with height: higher layers blow west faster and push toward the poles; lower layers are slower and push toward the equator. So picking an altitude picks your speed and your north-south drift. This project turns that into a race between AI pilots, simple rules, balloons that never change height, and a human player.
+
+**The simulator (`sim/`, Python).**
+- **Winds** cover 44–68 km in 15-minute steps. They're made up, but shaped to match probe measurements: slow below 50 km, 60–100 m/s in the safe 50–62 km band, and a fast cloud-top jet near 66 km. Each world has its own launch point and weather, including the height where the north-south push flips. The pilots only know a forecast.
+- **Risk:** outside 50–62 km, acid above and heat below wear out the envelope, and each hour there carries a chance of losing the balloon. Every balloon gets 45 km of climbing (ballast) and 45 km of sinking (gas) for the whole flight.
+- **Things to collect:** 60 real named sites (USGS/IAU gazetteer); eruptions, gas plumes and lightning at 70 real volcanoes, with eruptions coming in spells; four mission-control messages per world (gas plumes worth triple, a bonus site, a relay outage, a volcano alert); and cloud-top and deep-air samples that only count inside the risky layers.
+- **Scoring** ends at day 30, so surviving past it is worth nothing.
+
+**The pilots.**
+- **Fixed balloons** park at one altitude, including 54 km, as the Vega balloons did in 1985.
+- **The rulebook** holds the busiest latitude lane until it runs out of sites, then roams, and sprints through the risky layers in its last 6 days.
+- **Gemini Robotics-ER 2 and Gemini 3.8 Flash** look at a map image every 2 days (and whenever a message arrives), pick a lane, roam, sprint, or a place to head for, and explain why in one sentence.
+- **The hybrid** lets the rulebook fly and only asks Gemini when a message, an open request, or a burst of eruptions comes up.
+- **Shared autopilot code** flies between decisions for every pilot: a search planner that weighs risk against the days left, and a lane holder that learns the real winds.
+
+**The website (`web/`, three.js).** A full-screen 3D Venus, with height exaggerated about 30×, shows glowing wind particles tinted by their north or south push, tethered balloons with trails, eruption pulses with halos that shrink as each one's time runs out, a 24-hour forecast for the selected balloon, and captured science lighting up on the surface. A wind panel lists each layer's speed and push, and a "director" camera frames each eruption catch in slow motion. You can fly your own balloon live, with the same physics and rules, against the AIs' saved flights. The site replays saved runs, so it can't crash on stage.
+
+**Results so far** (20 worlds × 30 days, before the risk layers): rulebook 393, hybrid 387, best fixed altitude 316, Flash 274, ER 2 271. Simple rules are still hard to beat; the models read messages well but detour too often. See "Current state" below for the latest.
+
+**Code map:** `sim/venus.py` winds, physics and risk · `sim/planner.py` the search planner · `sim/mission.py` the mission loop and lane holder · `sim/strategist.py`, `sim/commander.py` the rulebook, Gemini and hybrid decisions · `sim/events.py`, `sim/missionctl.py` eruptions, messages and samples · `sim/export_web.py` builds the website's data · `web/app.js` the browser simulator and page · `web/globe.js` the 3D scene.
+
 ## Pitch
 
 Balloons can't steer, but they can choose their wind. Our agent flies a balloon through the clouds of Venus by changing altitude, reaching science targets that no lander can survive long enough to visit.

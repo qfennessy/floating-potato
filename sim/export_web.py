@@ -20,6 +20,7 @@ import strategist as sg
 import venus
 from mission import fly
 from events import VOLCANOES
+from missionctl import make_messages
 from venus import CAPTURE_KM, CORRIDOR_KM, STEP_S, TARGET_SIZE, TARGETS
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -64,7 +65,7 @@ def fly_agent(model_key, seeds, days):
         run = fly(f"{model_key}_s{seed}", days, seed=seed, commander=com, strategist=strat)
         fb = sum("rule fallback" in l["text"] for l in run["log"])
         (PARTS / f"world{seed}_{model_key}.json").write_text(json.dumps(
-            {"run": slim(run, name, who=name), "events": run["events"], "start": run["start"],
+            {"run": slim(run, name, who=name), "events": run["events"], "messages": run["messages"], "start": run["start"],
              "weather": venus.WX, "model": name, "fallbacks": fb}, separators=(",", ":")))
         print(f"world {seed} {name}: {run['points']:.0f} points, {fb} fallbacks", flush=True)
 
@@ -78,7 +79,7 @@ def assemble(days):
     rows = []
     for s in SEEDS:
         parts = {k: json.loads((PARTS / f"world{s}_{k}.json").read_text())
-                 for k in ("er", "flash") if (PARTS / f"world{s}_{k}.json").exists()}
+                 for k in ("er", "flash", "rules") if (PARTS / f"world{s}_{k}.json").exists()}
         if "er" not in parts:
             continue
         vega = fly(f"vega_s{s}", days, seed=s, fixed_alt=54.0)
@@ -87,23 +88,26 @@ def assemble(days):
                 "best": slim(fixed[s][single], f"Best single fixed altitude for all worlds ({single:g} km)")}
         if "flash" in parts:
             runs["flash"] = parts["flash"]["run"]
+        if "rules" in parts:
+            runs["rules"] = {**parts["rules"]["run"], "label": "Rulebook"}
         avg = float(np.mean([fixed[s][a]["points"] for a in map(float, LEVELS)]))
         world = {
             "seed": s, "days": days, "step_h": STEP_S / 3600, "commander": "Gemini Robotics-ER 2 and Gemini 3.8 Flash",
             "capture_km": CAPTURE_KM, "corridor_km": CORRIDOR_KM,
             "targets": {k: list(v) for k, v in TARGETS.items()}, "target_size": TARGET_SIZE,
             "volcanoes": {k: list(v) for k, v in VOLCANOES.items()},
-            "events": er["events"], "start": er["start"], "weather": er["weather"], "forecast": venus.FORECAST,
+            "events": er["events"], "messages": make_messages(s, days)[0], "start": er["start"], "weather": er["weather"], "forecast": venus.FORECAST,
             "fixed_points": {f"{a:g}": fixed[s][a]["points"] for a in map(float, LEVELS)}, "avg_fixed": avg,
             "runs": runs,
         }
         (WEB / "data" / f"world{s}.json").write_text(json.dumps(world, separators=(",", ":")))
         rows.append({"seed": s, "agent": runs["agent"]["points"], "flash": runs.get("flash", {}).get("points"),
+                     "rules": runs.get("rules", {}).get("points"),
                      "vega": runs["vega"]["points"], "best": runs["best"]["points"], "best_alt": single,
                      "avg": round(avg, 1)})
     (WEB / "data" / "index.json").write_text(json.dumps({"days": days, "worlds": rows}))
     tot = lambda k: sum(r[k] or 0 for r in rows)
-    print(f"{len(rows)} worlds, {days:g} days. ER 2 {tot('agent'):.0f}, Flash {tot('flash'):.0f}, "
+    print(f"{len(rows)} worlds, {days:g} days. ER 2 {tot('agent'):.0f}, Flash {tot('flash'):.0f}, rulebook {tot('rules'):.0f}, "
           f"best single fixed ({single:g} km) {tot('best'):.0f}, Vega {tot('vega'):.0f}, average fixed {tot('avg'):.0f}")
 
 

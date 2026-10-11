@@ -7,9 +7,9 @@ import { Line2 } from "three/addons/lines/Line2.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 
-const COLOR = { agent: 0xffb347, flash: 0x34d399, vega: 0xd8d8d8, best: 0x7cc4ff, you: 0xf472b6 };
-const ALL_RUNS = ["best", "vega", "flash", "agent", "you"];
-const KIND = { rumble: "eruption", so2: "gas plume", lightning: "lightning" };
+const COLOR = { agent: 0xffb347, flash: 0x34d399, rules: 0xa78bfa, vega: 0xd8d8d8, best: 0x7cc4ff, you: 0xf472b6 };
+const ALL_RUNS = ["best", "vega", "rules", "flash", "agent", "you"];
+const KIND = { rumble: "eruption", so2: "gas plume", lightning: "lightning", major: "major eruption" };
 
 // lat/lon (deg, lon 0..360 E) -> point on a sphere, matching three's SphereGeometry UVs so the
 // texture (0..360 E, left to right) lines up with our coordinates.
@@ -183,6 +183,17 @@ class Globe {
     });
     this.events = [];
     this.syncEvents();
+    // Mission control markers: the priority site and the volcano alert, shown while they apply.
+    this.markers = (world.messages || []).filter((m) => m.type === "priority" || m.type === "tip").map((m) => {
+      const [lat, lon] = m.type === "priority" ? [m.lat, m.lon] : world.volcanoes[m.site];
+      const g = ring(lat, lon, world.capture_km * 1.6, 1.008);
+      g.material.color.set(m.type === "priority" ? 0xe879f9 : 0xfb923c);
+      const l = label(m.type === "priority" ? `PRIORITY · ${m.site} (+10)` : `ALERT · ${m.site}`, "marker");
+      l.position.copy(toXYZ(lat, lon, 1.03));
+      g.visible = l.visible = false;
+      this.dynamic.add(g); this.dynamic.add(l);
+      return { m, ring: g, label: l, until: m.type === "priority" ? m.until_h : m.erupt_h + 72 };
+    });
     // Sites get name labels only if they are among the 12 biggest, or once a balloon reaches them.
     this.big = new Set(Object.entries(world.target_size || {}).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k]) => k));
   }
@@ -206,6 +217,7 @@ class Globe {
     if (!this.world) return;
     this.T = T;
     this.syncEvents();
+    for (const mk of this.markers || []) mk.ring.visible = mk.label.visible = T >= mk.m.t_h && T < mk.until;
     // Your track grows live: refresh its line when it gets longer or is rewound.
     const yt = this.world.runs.you.track;
     if (yt.length !== this.youLen) {
@@ -275,7 +287,7 @@ class Globe {
     const cam = this.camera.position.clone().normalize();
     const facing = (o) => o.getWorldPosition(new THREE.Vector3()).normalize().dot(cam) > 0.15;
     for (const t of this.targets || []) if (t.label.visible) t.label.element.style.opacity = facing(t.label) ? 1 : 0;
-    for (const ev of this.events || []) if (ev.label.visible) ev.label.element.style.opacity = facing(ev.label) ? 1 : 0;
+    for (const ev of [...(this.events || []), ...(this.markers || [])]) if (ev.label.visible) ev.label.element.style.opacity = facing(ev.label) ? 1 : 0;
     this.renderer.render(this.scene, this.camera);
     this.labels.render(this.scene, this.camera);
   }

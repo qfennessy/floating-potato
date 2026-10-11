@@ -41,6 +41,7 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; }
 .glabels { position: absolute; inset: 0; }
 .glabel { font: 600 11px Inter, sans-serif; color: #fff; text-shadow: 0 0 4px #000, 0 0 2px #000; white-space: nowrap; pointer-events: none; transition: opacity .2s; transform: translateY(-10px); }
 .glabel.event { color: var(--heard); }
+.glabel.marker { color: #f0abfc; font-size: 12px; }
 @media (max-width: 600px) { .globe { aspect-ratio: 1 / 1; } }
 .pilot { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--you); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
 .pilot input[type=range] { flex: 1; min-width: 140px; accent-color: var(--you); }
@@ -65,6 +66,10 @@ button:hover { border-color: var(--agent); }
 .sw.you { background: var(--you); }
 .sw.agent { background: var(--agent); }
 .sw.flash { background: #34d399; }
+.sw.rules { background: #a78bfa; }
+.score .rules b { color: #a78bfa; }
+.log li.message { background: rgba(244,114,182,0.08); border-left: 3px solid #e879f9; padding-left: 8px; }
+.log li.message .k { color: #e879f9; }
 .score .flash b { color: #34d399; }
 .log li .who { font: 600 11px Inter, sans-serif; margin-left: 6px; } .sw.vega { background: var(--vega); } .sw.best { background: var(--best); }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid; }

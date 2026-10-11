@@ -43,7 +43,7 @@ def _prompt(ev, st, eta_h, hours_left, fixed_todo):
         f"Now: {st.hours:.0f} hours into a 10-day mission, at lat {st.lat:.1f}, lon {st.lon:.1f} E, "
         f"altitude {st.alt:.1f} km.\n"
         f"Your {ev.spec['sensor']} just reported: {ev.label()}, around lat {ev.rep_lat:.1f}, "
-        f"lon {ev.rep_lon:.1f} E. It is worth {ev.spec['value']:.0f} science points and fades in "
+        f"lon {ev.rep_lon:.1f} E. It is worth {getattr(ev, 'cur_value', ev.spec['value']):.0f} science points right now and fades in "
         f"{hours_left:.0f} hours; {eta}.\n"
         f"Fixed targets still unvisited (1 point each, they come around every lap): "
         f"{', '.join(fixed_todo) or 'none'}.\n"

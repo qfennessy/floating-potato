@@ -2,12 +2,12 @@
 // balloon live in the same world: you set the altitude, the same physics as sim/venus.py moves it.
 // No live model calls, so the demo can't crash on stage.
 
-const RUNS = ["best", "vega", "flash", "agent", "you"];   // draw order: you on top
-const COLOR = { agent: "#ffb347", flash: "#34d399", vega: "#c9c9c9", best: "#7cc4ff", you: "#f472b6" };
+const RUNS = ["best", "vega", "rules", "flash", "agent", "you"];   // draw order: you on top
+const COLOR = { agent: "#ffb347", flash: "#34d399", rules: "#a78bfa", vega: "#c9c9c9", best: "#7cc4ff", you: "#f472b6" };
 const AI = ["agent", "flash"];                          // agent = Gemini Robotics-ER 2, flash = Gemini 3.8 Flash
 const runsIn = () => RUNS.filter((r) => state.world.runs[r]);
 const ais = () => AI.filter((r) => state.world.runs[r]);
-const KIND = { rumble: "eruption", so2: "gas plume", lightning: "lightning" };
+const KIND = { rumble: "eruption", so2: "gas plume", lightning: "lightning", major: "major eruption" };
 
 const $ = (id) => document.getElementById(id);
 const mapC = $("map"), stripC = $("strip");
@@ -36,6 +36,10 @@ const runIdx = (r, i) => (r === "you" ? state.world.runs.you.track.length - 1 : 
 function valueOf(target) {
   const ev = state.world.events.find((e) => e.id === target);
   return ev ? ev.value : 1;
+}
+function pointsBy(run, T) {
+  return state.world.runs[run].log.filter((l) => (l.kind === "reached" || l.kind === "you") && l.t_h <= T)
+    .reduce((s, l) => s + (l.pts ?? valueOf(l.target)), 0);
 }
 function reachedBy(run, T) {
   return state.world.runs[run].log.filter((l) => (l.kind === "reached" || l.kind === "you") && l.t_h <= T).map((l) => l.target);
@@ -100,6 +104,22 @@ function advance([lat, lon, alt], hours, aim) {
   return [clamp(lat + dlat, -85, 85), mod(lon + dlon, 360), alt];
 }
 
+// Mission control rules (port of sim/missionctl.py points_for / bonus_targets).
+const msgs = () => state.world.messages || [];
+const bonusLive = (h) => msgs().filter((m) => m.type === "priority" && m.t_h <= h && h < m.until_h);
+function pointsFor(target, h, lat) {
+  let base;
+  if (target.startsWith("BONUS:")) base = 10;
+  else {
+    const ev = state.world.events.find((e) => e.id === target);
+    base = ev ? ev.value : 1;
+    if (ev && ev.kind === "so2" && msgs().some((m) => m.type === "plumes" && m.t_h <= h && h < m.until_h)) base *= 3;
+  }
+  for (const m of msgs())
+    if (m.type === "outage" && m.t_h <= h && h < m.until_h && (lat < 0) === (m.hemi === "south")) return 0;
+  return base;
+}
+
 // Your flight is stored like a replayed run (track + log), grown or rewound to match the clock.
 function newYou() {
   const [lat, lon] = state.world.start;
@@ -121,10 +141,12 @@ function syncYou() {
     you.aims.push(state.aim);
     const got = new Set(you.log.map((l) => l.target));
     const cands = [...Object.entries(state.world.targets).map(([n, [la, lo]]) => [n, la, lo, n]),
-                   ...active.map((e) => [e.id, e.lat, e.lon, `${KIND[e.kind]}${e.site ? " near " + e.site : ""}`])];
+                   ...active.map((e) => [e.id, e.lat, e.lon, `${KIND[e.kind]}${e.site ? " near " + e.site : ""}`]),
+                   ...bonusLive(hours).map((m) => [`BONUS:${m.site}`, m.lat, m.lon, `the priority site ${m.site} (bonus)`])];
+    const h1 = hours + state.world.step_h;
     for (const [id, la, lo, name] of cands)
       if (!got.has(id) && gcKm(next[0], next[1], la, lo) <= CAPTURE_KM)
-        you.log.push({ t_h: hours + state.world.step_h, kind: "you", target: id, text: `You reached ${name}` });
+        you.log.push({ t_h: h1, kind: "you", target: id, text: `You reached ${name}`, pts: pointsFor(id, h1, next[0]) });
   }
 }
 function setAim(a) {
@@ -264,24 +286,27 @@ function drawStrip() {
 
 // ---------- side panels ----------
 function drawScore() {
-  const cards = [["you", "You"], ["agent", "Gemini ER 2"], ["flash", "Gemini 3.8 Flash"], ["vega", "Vega-style drifter"],
-                 ["best", "Best single fixed altitude"]].filter(([r]) => state.world.runs[r]);
+  const cards = [["you", "You"], ["agent", "Gemini ER 2"], ["flash", "Gemini 3.8 Flash"], ["rules", "Rulebook"],
+                 ["vega", "Vega-style drifter"], ["best", "Best single fixed altitude"]].filter(([r]) => state.world.runs[r]);
   $("score").innerHTML = cards.map(([r, name]) => {
-    const pts = reachedBy(r, state.T).reduce((s, t) => s + valueOf(t), 0);
+    const pts = pointsBy(r, state.T);
     return `<div class="card ${r}"><b>${pts}</b><span>${name} points</span></div>`;
   }).join("");
 }
 
 function drawLog() {
   const T = state.T, w = state.world;
-  const entries = [...ais().flatMap((r) => w.runs[r].log.map((l) => ({ ...l, run: r }))), ...w.runs.you.log.map((l) => ({ ...l, run: "you" }))]
+  const entries = [...ais().flatMap((r) => w.runs[r].log.filter((l) => l.kind !== "message").map((l) => ({ ...l, run: r }))),
+                   ...w.runs.you.log.map((l) => ({ ...l, run: "you" })),
+                   ...msgs().map((m) => ({ t_h: m.t_h, kind: "message", text: m.text, run: "mc" }))]
     .filter((l) => l.t_h <= T).sort((a, b) => a.t_h - b.t_h);
   if (entries.length === state.logCount) return;
   state.logCount = entries.length;
-  const label = { strategy: "strategy", detect: "heard", decision: "decided", reached: "reached", missed: "missed", you: "you" };
-  const who = { agent: "ER 2", flash: "Flash", you: "" };
+  const label = { strategy: "strategy", detect: "heard", decision: "decided", reached: "reached", missed: "missed", you: "you",
+                  message: "mission control", arrived: "arrived" };
+  const who = { agent: "ER 2", flash: "Flash", you: "", mc: "" };
   $("log").innerHTML = entries.slice().reverse().map((l) =>
-    `<li class="${l.kind}"><span class="t">day ${hoursToDay(l.t_h)}</span><span class="who" style="color:${COLOR[l.run]}">${who[l.run]}</span><span class="k">${label[l.kind] || l.kind}</span><br>${escapeHtml(l.text)}${l.kind === "reached" || l.kind === "you" ? ` <b>+${valueOf(l.target)}</b>` : ""}</li>`
+    `<li class="${l.kind}"><span class="t">day ${hoursToDay(l.t_h)}</span><span class="who" style="color:${COLOR[l.run]}">${who[l.run]}</span><span class="k">${label[l.kind] || l.kind}</span><br>${escapeHtml(l.text)}${l.kind === "reached" || l.kind === "you" ? ` <b>+${l.pts ?? valueOf(l.target)}</b>` : ""}</li>`
   ).join("") || `<li class="t">Listening…</li>`;
 }
 const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -290,12 +315,60 @@ function drawTable() {
   const rows = state.index.worlds;
   const tot = (k) => rows.reduce((s, r) => s + (r[k] ?? 0), 0);
   $("table").innerHTML =
-    `<tr><th>World</th><th>Gemini ER 2</th><th>Gemini 3.8 Flash</th><th>Drifter 54 km</th><th>Average fixed altitude</th><th>Best single fixed altitude</th></tr>` +
+    `<tr><th>World</th><th>Gemini ER 2</th><th>Gemini 3.8 Flash</th><th>Rulebook</th><th>Drifter 54 km</th><th>Average fixed altitude</th><th>Best single fixed altitude</th></tr>` +
     rows.map((r) => `<tr class="${r.seed === state.world.seed ? "current" : ""}" data-seed="${r.seed}" style="cursor:pointer">
-      <td>World ${r.seed}</td><td class="${r.agent > r.best ? "win" : ""}">${r.agent}</td><td class="${(r.flash ?? 0) > r.best ? "win" : ""}">${r.flash ?? "–"}</td>
+      <td>World ${r.seed}</td><td class="${r.agent > r.best ? "win" : ""}">${r.agent}</td><td class="${(r.flash ?? 0) > r.best ? "win" : ""}">${r.flash ?? "–"}</td><td>${r.rules ?? "–"}</td>
       <td>${r.vega}</td><td>${r.avg}</td><td>${r.best} <span class="note">(${r.best_alt} km)</span></td></tr>`).join("") +
-    `<tr><td><b>Total</b></td><td><b>${tot("agent")}</b></td><td><b>${tot("flash")}</b></td><td><b>${tot("vega")}</b></td><td><b>${Math.round(tot("avg") * 10) / 10}</b></td><td><b>${tot("best")}</b></td></tr>`;
+    `<tr><td><b>Total</b></td><td><b>${tot("agent")}</b></td><td><b>${tot("flash")}</b></td><td><b>${tot("rules")}</b></td><td><b>${tot("vega")}</b></td><td><b>${Math.round(tot("avg") * 10) / 10}</b></td><td><b>${tot("best")}</b></td></tr>`;
   $("table").querySelectorAll("tr[data-seed]").forEach((tr) => tr.onclick = () => load(+tr.dataset.seed));
+}
+
+// ---------- sound: small volcano effects, made in the browser (no audio files) ----------
+// Browsers only allow sound after a click or key press, so audio starts on your first interaction.
+const audio = { ctx: null, on: true, lastT: 0, lastPlay: 0 };
+function audioCtx() {
+  if (!audio.ctx) { try { audio.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { audio.on = false; } }
+  if (audio.ctx && audio.ctx.state === "suspended") audio.ctx.resume();
+  return audio.ctx;
+}
+["pointerdown", "keydown"].forEach((ev) => document.addEventListener(ev, () => audio.on && audioCtx(), { once: true }));
+function noise(ctx, secs) {
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * secs), ctx.sampleRate), d = buf.getChannelData(0);
+  for (let k = 0; k < d.length; k++) d[k] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource(); src.buffer = buf; return src;
+}
+function playVolcano(kind) {
+  const ctx = audio.ctx;
+  if (!audio.on || !ctx || ctx.state !== "running") return;
+  const now = ctx.currentTime, big = kind === "major", hiss = kind === "so2";
+  const secs = big ? 2.2 : hiss ? 0.7 : 1.1;
+  const src = noise(ctx, secs), filt = ctx.createBiquadFilter(), gain = ctx.createGain();
+  filt.type = hiss ? "bandpass" : "lowpass";
+  filt.frequency.value = hiss ? 3200 : big ? 90 : 140;
+  filt.Q.value = hiss ? 1.2 : 0.8;
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(big ? 0.9 : hiss ? 0.08 : 0.45, now + (hiss ? 0.05 : 0.12));
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + secs);
+  src.connect(filt).connect(gain).connect(ctx.destination);
+  if (!hiss) {                                   // a low thump under the rumble
+    const o = ctx.createOscillator(), g2 = ctx.createGain();
+    o.frequency.setValueAtTime(big ? 55 : 70, now); o.frequency.exponentialRampToValueAtTime(30, now + secs * 0.8);
+    g2.gain.setValueAtTime(big ? 0.5 : 0.25, now); g2.gain.exponentialRampToValueAtTime(0.0001, now + secs * 0.8);
+    o.connect(g2).connect(ctx.destination); o.start(now); o.stop(now + secs);
+  }
+  src.start(now); src.stop(now + secs);
+}
+function sounds(dt) {
+  const T = state.T, prev = audio.lastT;
+  audio.lastT = T;
+  if (!state.playing || T <= prev || T - prev > 24) return;      // no sound when scrubbing or jumping
+  const started = state.world.events.filter((e) => e.kind !== "lightning" && e.t_h > prev && e.t_h <= T);
+  const nowMs = performance.now();
+  for (const e of started.slice(0, 1)) {
+    if (nowMs - audio.lastPlay < 350) break;                      // never a pile-up of sounds
+    audio.lastPlay = nowMs;
+    playVolcano(e.kind);
+  }
 }
 
 // ---------- globe hookup (globe.js is a module and may load after this script) ----------
@@ -317,7 +390,7 @@ function frame(now) {
       state.T += dt * state.speed;                   // no end: your flight keeps going
     }
     state.maxT = Math.max(state.maxT, state.T, totalH());
-    syncYou(); drawPilot();
+    syncYou(); drawPilot(); sounds(dt);
     $("scrub").value = Math.round(state.T / state.maxT * 1000);
     $("clock").textContent = `day ${hoursToDay(state.T)}` + (state.T > totalH() ? ` · AI flights ended day ${state.world.days}` : "");
     if (flatShown()) drawMap();
@@ -337,7 +410,7 @@ function setPlaying(p) {
 
 async function load(seed) {
   state.world = await (await fetch(`data/world${seed}.json`)).json();
-  state.T = 0; state.maxT = 0; state.logCount = -1;
+  state.T = 0; state.maxT = 0; state.logCount = -1; audio.lastT = 0;
   state.gen = { t: state.world.days * 24, n: 0, rand: rng32(state.world.seed * 7919 + 17) };
   state.big = new Set(Object.entries(state.world.target_size || {}).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k]) => k));
   state.world.runs.you = newYou();
@@ -372,6 +445,12 @@ async function init() {
     $("follow").hidden = flat;
   };
   $("follow").onclick = () => globe() && globe().setFollow(!globe().follow);
+  $("sound").onclick = () => {
+    audio.on = !audio.on;
+    if (audio.on) audioCtx();
+    $("sound").textContent = audio.on ? "Sound on" : "Sound off";
+    $("sound").classList.toggle("on", audio.on);
+  };
   $("speed").value = String(state.speed);
   $("scrub").oninput = (e) => { state.T = e.target.value / 1000 * state.maxT; state.logCount = -1; };
   const q = +new URLSearchParams(location.search).get("world");

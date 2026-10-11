@@ -46,7 +46,7 @@ def build_lanes(k=6, min_gap=7.0):
             break
         if all(abs(c - l) >= min_gap for l in lanes.values()):
             nv, ns = len(near(c, VOLCANOES)), len(near(c, TARGETS))
-            name = f"{abs(c):.0f}{'N' if c >= 0 else 'S'} ({nv} volcanoes, {ns} sites)"
+            name = f"lane {abs(c):.0f}{'N' if c >= 0 else 'S'}"     # no counts: read them off the map
             lanes[name] = c
             vols[name] = near(c, VOLCANOES)
     return lanes, vols
@@ -54,15 +54,18 @@ def build_lanes(k=6, min_gap=7.0):
 
 LANES, LANE_VOLCANOES = build_lanes()
 ROAM = "roam (no lane: fly fast and hunt the nearest unvisited sites)"
+PLACES = sorted(set(VOLCANOES) | set(TARGETS))     # names the strategist may head for
 
 
-def roam_choice(view, reason):
-    return {"lane": ROAM, "hold_lat": None, "focus": list(VOLCANOES), "fixed": view["unvisited"], "reason": reason}
+def roam_choice(view, reason, goto=None):
+    return {"lane": ROAM, "hold_lat": None, "focus": list(VOLCANOES), "fixed": view["unvisited"],
+            "reason": reason, "goto": goto}
 
 
-def lane_choice(lane, view, reason):
+def lane_choice(lane, view, reason, goto=None):
     return {"lane": lane, "hold_lat": LANES[lane], "focus": LANE_VOLCANOES[lane],
-            "fixed": [t for t in view["unvisited"] if abs(TARGETS[t][0] - LANES[lane]) <= 6], "reason": reason}
+            "fixed": [t for t in view["unvisited"] if abs(TARGETS[t][0] - LANES[lane]) <= 6],
+            "reason": reason, "goto": goto}
 
 
 def travel_days(lat_from, lat_to):
@@ -124,6 +127,19 @@ def render_map(st, view, px=1024):
         ax.plot(lon, lat, "^", color="red" if counts[v] == 0 else "yellow", mec="black", ms=7)
     for t, (lat, lon) in TARGETS.items():
         ax.plot(lon, lat, "*", color="lime" if t in view["reached"] else "white", mec="black", ms=8)
+    for m in view.get("messages", []):                  # what mission control asked for, if still live
+        if m["type"] == "priority" and st.hours < m["until_h"]:
+            ax.plot(m["lon"], m["lat"], "o", mfc="none", mec="magenta", ms=22, mew=3)
+            ax.annotate("PRIORITY", (m["lon"], m["lat"]), xytext=(12, 10), textcoords="offset points",
+                        color="magenta", fontsize=10, weight="bold")
+        if m["type"] == "tip" and st.hours < m["erupt_h"] + 72:
+            lat, lon = VOLCANOES[m["site"]]
+            ax.plot(lon, lat, "o", mfc="none", mec="orange", ms=22, mew=3)
+            ax.annotate("ALERT", (lon, lat), xytext=(12, 10), textcoords="offset points",
+                        color="orange", fontsize=10, weight="bold")
+        if m["type"] == "outage" and m["t_h"] <= st.hours < m["until_h"]:
+            lo, hi = (-90, 0) if m["hemi"] == "south" else (0, 90)
+            ax.axhspan(lo, hi, color="black", alpha=0.35, hatch="//")
     ax.set_xlim(0, 360)
     ax.set_ylim(-90, 90)
     ax.axis("off")
@@ -134,17 +150,16 @@ def render_map(st, view, px=1024):
 
 
 def _prompt(st, view):
-    heard = view["events_heard"][-6:]
+    heard = view["events_heard"][-12:]
     lines = "\n".join(f"- hour {l['t_h']:.0f}: {l['text']}" for l in heard) or "- nothing yet"
+    msgs = "\n".join(f"- hour {m['t_h']:.0f}: {m['text']}" for m in view.get("messages", [])) or "- none yet"
     current = view.get("lane")
-    counts = {lane: sum(e.site in vs for e in view["known"]) for lane, vs in LANE_VOLCANOES.items()}
-    todo = {lane: sum(abs(TARGETS[t][0] - lat) <= REACH_DEG for t in view["unvisited"]) for lane, lat in LANES.items()}
     lanes = "\n".join(
-        f"- {lane}: about {travel_days(st.lat, lat):.1f} days to get there; {todo[lane]} unvisited sites "
-        f"left in it; {counts[lane]} events heard there so far" + ("  <- CURRENT LANE" if lane == current else "")
-        for lane, lat in LANES.items())
-    lanes += f"\n- {ROAM}: {len(view['unvisited'])} unvisited sites anywhere" + ("  <- CURRENT" if current == ROAM else "")
+        f"- {lane} (latitude {lat:+.0f}): about {travel_days(st.lat, lat):.1f} days to get there"
+        + ("  <- CURRENT" if lane == current else "") for lane, lat in LANES.items())
+    lanes += f"\n- {ROAM}" + ("  <- CURRENT" if current == ROAM else "")
     left_days = view["days"] - st.hours / 24
+    goto = f"Currently heading for: {view['goto']}.\n" if view.get("goto") else ""
     return (
         "You are the strategist for a research balloon in the clouds of Venus. The image is a map "
         "(longitude 0-360 E left to right, latitude +90 top to -90 bottom). Winds carry the balloon "
@@ -152,20 +167,21 @@ def _prompt(st, view):
         "The balloon steers only by altitude: low (50 km) is slower and drifts toward the equator; "
         "high (62 km) is faster and drifts toward the poles. A planner handles altitude for you.\n"
         f"Hour {st.hours:.0f} of {view['days'] * 24:.0f}. Balloon at lat {st.lat:.1f}, lon {st.lon:.1f} E.\n"
-        "Points: fixed site 1 (once each), eruption 2, gas plume 3, lightning 1. Eruptions and plumes "
-        "happen at the red volcanoes; the label shows how many each has produced so far. Events last "
-        "1-3 days and the balloon must pass within 350 km while one is active. On the map: red "
-        "triangles are volcanoes (yellow once they have erupted), white stars are unvisited sites, "
-        "green stars visited ones, cyan bands are the lanes.\n"
-        f"Recent sensor reports:\n{lines}\n"
-        "Because the wind always blows west, a balloon that holds one latitude passes every site in "
-        "that lane once a lap, about every 4-5 days. Holding a lane means cruising at the altitude "
-        "with no north-south drift, which is slower than flying high. Sites score only once, so a "
-        "lane runs dry after a lap or two; volcanoes can erupt again. Roaming instead lets the "
-        "planner chase the nearest unvisited sites, usually flying high and fast and sweeping "
-        "across latitudes.\n"
-        f"Choices ({left_days:.1f} days of mission left):\n{lanes}\n"
-        "Events happen at random, so a burst of recent activity does not mean more is coming there. "
+        "Points: each named site 1 (once), eruption 2, gas plume 3, lightning 1, unless mission "
+        "control says otherwise. Events last 1-3 days and the balloon must pass within 350 km while "
+        "one is active.\n"
+        "Map key: red triangles are volcanoes (yellow once one has erupted during this mission), "
+        "white stars are sites not yet visited, green stars visited ones, cyan bands are the lanes, "
+        "magenta PRIORITY and orange ALERT circles mark mission control requests, hatched area is a "
+        "relay outage.\n"
+        f"Messages from mission control:\n{msgs}\n"
+        f"Sensor reports so far (most recent last):\n{lines}\n"
+        "Holding a lane means cruising at the altitude with no north-south drift, passing everything "
+        "in it once a lap; it is slower than flying high. Sites score only once, so judge from the map "
+        "how many unvisited sites each lane still has. Roaming lets the planner chase the nearest "
+        "unvisited sites, flying high and fast across latitudes. You can also name one place to head "
+        "for first (head_for); the planner flies there, then goes back to your lane or roaming.\n"
+        f"{goto}Choices ({left_days:.1f} days of mission left):\n{lanes}\n"
         "Call choose_lane once, with a one-sentence reason a mission log reader understands."
     )
 
@@ -174,9 +190,11 @@ def gemini_strategist(model=MODEL, thinking="medium", timeout=120):
     key = os.environ.get("GEMINI_API_KEY")
     tool = {"functionDeclarations": [{
         "name": "choose_lane",
-        "description": "Choose the latitude lane the balloon cruises in until the next check-in.",
+        "description": "Choose the latitude lane (or roam) until the next check-in, and optionally one place to head for first.",
         "parameters": {"type": "object", "properties": {
             "lane": {"type": "string", "enum": list(LANES) + [ROAM]},
+            "head_for": {"type": "string", "enum": ["none"] + PLACES,
+                         "description": "A named site or volcano to fly to first, or none."},
             "reason": {"type": "string"}},
             "required": ["lane", "reason"]}}]}
 
@@ -201,11 +219,12 @@ def gemini_strategist(model=MODEL, thinking="medium", timeout=120):
                 parts = json.load(resp)["candidates"][0]["content"]["parts"]
             args = next(p["functionCall"] for p in parts if "functionCall" in p).get("args", {})
             lane, reason = args.get("lane"), args.get("reason", "").strip()
+            goto = args.get("head_for") if args.get("head_for") in PLACES else None
             if lane == ROAM:
-                return roam_choice(view, reason)
+                return roam_choice(view, reason, goto)
             if lane not in LANES:
                 lane = view.get("lane") if view.get("lane") in LANES else list(LANES)[0]
-            return lane_choice(lane, view, reason)
+            return lane_choice(lane, view, reason, goto)
         except Exception as e:
             out = rule_strategist(st, view)
             out["reason"] += f" (rule fallback: {type(e).__name__})"

@@ -12,7 +12,7 @@ Why it matters: Venus's surface is 460 °C and 90 atmospheres, so landers die in
 
 Win condition for the demo: the agent reaches more targets in the same number of Earth days than a balloon that rides one altitude around the planet.
 
-## Current state (Oct 11, 14:55)
+## Current state (Oct 11, 15:25)
 
 Live demo: https://venus-balloon-navigator.vercel.app
 
@@ -26,7 +26,7 @@ Team: one human (Q) and Claude Code.
 | Lanes | Worked out from where volcanoes and sites cluster (6 lanes, e.g. 11°N with 10 volcanoes) | `sim/strategist.py` |
 | Roam | The planner chases the nearest unvisited sites at full speed | `sim/planner.py` |
 | Science sensor events | Eruptions, gas plumes and lightning; the balloon only hears nearby ones | `sim/events.py` |
-| Fly it yourself | On the website you fly a pink balloon live with a slider or arrow keys, against both AIs. No time limit: the AI flights end at day 30, yours keeps going and new events keep appearing | `web/app.js` |
+| Fly it yourself | On the website you fly a pink balloon live with a slider or arrow keys, against both AIs and the rulebook (purple). Small volcano sounds (made in the browser) play as eruptions and plumes start; there's a Sound on/off button. No time limit: the AI flights end at day 30, yours keeps going and new events keep appearing | `web/app.js` |
 | Website | 3D globe with star field and flat map; replays saved runs, so it can't crash on stage. Rebuild: `sim/export_web.py fly --model er|flash --seeds N` per world (in parallel), then `sim/export_web.py assemble`, then push to `main` | `web/` |
 
 **What we learned:**
@@ -34,18 +34,23 @@ Team: one human (Q) and Claude Code.
 - With a few volcanoes, holding the busiest lane won. With 60 one-time sites, lanes run dry after a lap or two, and flying high and fast while sweeping across latitudes wins. Both models chose "roam" about 70% of the time.
 - Varying launch points and weather removed the "58 km" luck: a fixed altitude only wins if you happen to pick the right one before launch.
 
-**Scoreboard, 20 worlds, 30 Earth days each.** A fixed balloon gets one altitude for every world, picked before launch, so the fair rival is the best single altitude across all worlds:
+**Harder worlds (added 15:20)**, built to separate the models from the rulebook:
+- **Mission control messages**, four per world in plain text: gas plumes worth 3× for 8 days; a priority site worth +10 within 7 days; a relay outage that zeroes captures in one hemisphere for 6 days; a seismic alert that a volcano will erupt (and a 5-point major eruption really happens). Scoring applies to every balloon; only the models can read them, and they can name a place to "head for".
+- **Volcanoes erupt in spells:** an eruption makes that volcano far likelier to erupt again over the next few days. The sensor log shows it; the rulebook ignores history.
+- **No crutches for the models:** the prompt no longer lists unvisited sites per lane; the models read them off the map image.
 
-| Balloon | Points |
-|---|---|
-| Rule-based strategist: hold a lane while it has 3+ unvisited sites, else roam | 363 |
-| Gemini 3.8 Flash | 303 |
-| Gemini Robotics-ER 2 | 300 |
-| Best single fixed altitude for all worlds (59.5 km) | 282 |
-| Average of the 8 fixed altitudes | 235 |
-| Fixed at 54 km, like Vega 1985 | 218 |
+**Scoreboard, 20 worlds, 30 Earth days each, harder worlds.** A fixed balloon gets one altitude for every world, picked before launch:
 
-**The plain rulebook beat both models by about 20%** (363 against 303 and 300; each model beat it in only 6 of 20 worlds). Same worlds, weather, planner and every-2-days check-ins; only the decision maker differs. The models roam about 70% of the time, the rulebook about 48%: the models leave lanes too early. Both AIs still beat the best fixed altitude by about 7%, and the two models are within 1% of each other: each wins about half the worlds. Model calls: ER 2 answers in about 3 s, Flash in about 30 s. No decision fell back to the rule version.
+| Balloon | Points | Sites | Bonus sites | Alert eruptions | Captures lost to outages |
+|---|---|---|---|---|---|
+| Rulebook: hold a lane while it has 3+ unvisited sites, else roam | 349 | 247 | 1 | 2 | 36 |
+| Gemini Robotics-ER 2 | 319 | 154 | 1 | 1 | 4 |
+| Best single fixed altitude for all worlds (59.5 km) | 317 | 207 | 3 | 0 | 16 |
+| Gemini 3.8 Flash | 306 | 185 | 3 | 1 | 17 |
+| Average of the 8 fixed altitudes | 241 | | | | |
+| Fixed at 54 km, like Vega 1985 | 221 | 151 | 2 | 0 | 13 |
+
+What it says: the models read the messages and react (ER 2 avoided the outage hemisphere almost completely), but they over-react. ER 2 named a place to head for at 63% of its check-ins, Flash at 37%, and those detours cost the steady site-sweeping that earns most points. Almost nobody reached the priority sites (1 to 3 of 20), which suggests many requests are too far north or south to reach in 7 days: the next fix is to make every request reachable. Before these changes (easier worlds): rulebook 363, Flash 303, ER 2 300.
 
 ## The simple version
 

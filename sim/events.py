@@ -22,6 +22,9 @@ KINDS = {
                 text="sulfur dioxide spike, a fresh plume"),
     "lightning": dict(sensor="radio receiver", value=1.0, life_h=12, detect_km=3000, blur_km=100,
                       text="radio crackle, possible lightning"),
+    # Only from mission control tips: a big eruption that was announced in advance.
+    "major": dict(sensor="microphone", value=5.0, life_h=72, detect_km=6000, blur_km=150,
+                  text="major eruption"),
 }
 
 
@@ -53,17 +56,29 @@ class Event:
         return f"{self.spec['text']}{where}"
 
 
+SPELL_BOOST = 25.0   # a volcano that just erupted is this many times likelier to go again...
+SPELL_DECAY_H = 96.0 # ...fading over about four days: eruptions come in spells
+
+
 def generate(days=10.0, seed=1, every_h=10.0):
-    """A repeatable list of events, about one every `every_h` hours."""
+    """A repeatable list of events, about one every `every_h` hours.
+
+    Volcanic events come in spells: each eruption or plume raises that volcano's odds of the
+    next one, fading over a few days. Agents that read the sensor log can notice a busy volcano;
+    a rule that only counts volcanoes per lane can't."""
     rng = np.random.default_rng(seed)
     out, t, n = [], rng.uniform(2, every_h), 0
     names = list(VOLCANOES)
+    last = {}                                            # volcano -> times of its recent events
     while t < days * 24:
-        kind = rng.choice(list(KINDS), p=[0.4, 0.35, 0.25])
+        kind = rng.choice(["rumble", "so2", "lightning"], p=[0.4, 0.35, 0.25])
         if kind == "lightning":
             lat, lon, site = rng.uniform(-35, 35), rng.uniform(0, 360), ""
         else:
-            site = names[rng.integers(len(names))]
+            w = np.array([1.0 + SPELL_BOOST * sum(np.exp(-(t - t0) / SPELL_DECAY_H) for t0 in last.get(v, []))
+                          for v in names])
+            site = names[rng.choice(len(names), p=w / w.sum())]
+            last.setdefault(site, []).append(t)
             lat, lon = VOLCANOES[site]
         blur = KINDS[kind]["blur_km"] / KM_PER_DEG
         rep_lat = float(np.clip(lat + rng.normal(0, blur / 2), -85, 85))

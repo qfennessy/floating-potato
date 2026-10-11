@@ -282,7 +282,11 @@ class Globe {
 
   load(world) {
     this.world = world;
+    // Labels nested inside other objects keep their page elements after clear(); remove them explicitly
+    // so switching worlds doesn't leave old place names floating over the controls.
+    this.dynamic.traverse((o) => { if (o.isCSS2DObject && o.element.parentNode) o.element.parentNode.removeChild(o.element); });
     this.dynamic.clear();
+    this.goal = null;
     this.lines = {}; this.balloons = {}; this.tethers = {}; this.youLen = -1;
     this.flash = {}; this.pulses = []; this.science = new Map(); this.finished = false; this.hero = null;
     const res = new THREE.Vector2(this.host.clientWidth, this.host.clientHeight);
@@ -531,6 +535,18 @@ class Globe {
     this.dynamic.add(this.captureDisc);
   }
 
+  // Your first target: a ring and a label at a suggested place, shown in the opening days.
+  setGoal(goal) {
+    if (this.goal) { this.dynamic.remove(this.goal.ring); this.goal.label.element.remove(); this.dynamic.remove(this.goal.label); this.goal = null; }
+    if (!goal) return;
+    const ring2 = ring(goal.lat, goal.lon, this.world.capture_km * 1.3, 1.01);
+    ring2.material.color.set(0xf472b6);
+    const l = label(`YOUR FIRST TARGET · ${goal.name} (+${goal.value})`, "marker");
+    l.position.copy(toXYZ(goal.lat, goal.lon, 1.05));
+    this.dynamic.add(ring2); this.dynamic.add(l);
+    this.goal = { ring: ring2, label: l, name: goal.name };
+  }
+
   setFinished(on) { if (on !== this.finished) this.finishedChanged = true; this.finished = on; }
 
   // ---------- deployment: a capsule streaks in, slows under a parachute, and releases the balloons ----------
@@ -721,9 +737,18 @@ class Globe {
       line.material.color.set(COLOR[r]).lerp(new THREE.Color(0xffffff), 1 - f);
     }
     const cam = this.camera.position.clone().normalize();
-    const facing = (o) => o.getWorldPosition(new THREE.Vector3()).normalize().dot(cam) > 0.15;
+    // Visible only on the near side of the planet, and never over the panels at the top and bottom.
+    const H = this.host.clientHeight, top = 70, bottom = H - (document.querySelector(".hud.bottom")?.offsetHeight || 200);
+    const facing = (o) => {
+      const p = o.getWorldPosition(new THREE.Vector3());
+      if (p.clone().normalize().dot(cam) <= 0.15) return false;
+      const y = (1 - p.project(this.camera).y) / 2 * H;
+      return y > top && y < bottom;
+    };
     for (const t of this.targets || []) if (t.label.visible) t.label.element.style.opacity = facing(t.label) ? 1 : 0;
-    for (const ev of [...(this.events || []), ...(this.markers || [])]) if (ev.label.visible) ev.label.element.style.opacity = facing(ev.label) ? 1 : 0;
+    for (const ev of [...(this.events || []), ...(this.markers || []), ...(this.goal ? [this.goal] : [])]) if (ev.label.visible) ev.label.element.style.opacity = facing(ev.label) ? 1 : 0;
+    for (const w of this.wrecks?.children || []) for (const c of w.children) if (c.isCSS2DObject) c.element.style.opacity = facing(c) ? 1 : 0;
+    if (this.nameTag) this.nameTag.element.style.opacity = facing(this.nameTag) ? 1 : 0;
     this.renderer.render(this.scene, this.camera);
     this.labels.render(this.scene, this.camera);
   }

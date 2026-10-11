@@ -218,6 +218,37 @@ function syncYou() {
         you.log.push({ t_h: h1, kind: "you", target: id, text: `You reached ${name}`, pts: pointsFor(id, h1, next[0]) });
   }
 }
+// Opening objective: one reachable place ahead of you, its points, and a height that drifts toward it.
+function pickGoal() {
+  const you = state.world.runs.you, [lat, lon] = you.track.at(-1), got = new Set(you.log.map((l) => l.target));
+  let best = null;
+  for (const [name, [la, lo]] of Object.entries(state.world.targets)) {
+    if (got.has(name)) continue;
+    const ahead = mod(lon - lo, 360);                          // the wind carries you west
+    if (ahead < 15 || ahead > 140 || Math.abs(la - lat) > 9) continue;
+    const score = Math.abs(la - lat) * 120 + ahead;            // close in latitude matters most
+    if (!best || score < best.score) best = { name, lat: la, lon: lo, value: 1, score };
+  }
+  if (!best) return null;
+  const need = best.lat - lat, lt = localTime(lon, state.T);
+  const levels = [50.5, 52, 53.5, 55, 56.5, 58, 59.5, 61.5];
+  const push = (a) => wind(lat, a, lt)[1];
+  best.alt = Math.abs(need) < 2.5 ? levels.reduce((p, a) => (Math.abs(push(a)) < Math.abs(push(p)) ? a : p))
+                                   : levels.reduce((p, a) => (push(a) * Math.sign(need) > push(p) * Math.sign(need) ? a : p));
+  best.dir = Math.abs(need) < 2.5 ? "hold your latitude" : need > 0 ? "drift north" : "drift south";
+  return best;
+}
+function goalText() {
+  const g = state.goal;
+  if (!g) return "";
+  return `<span class="goal">First target: <b>${escapeHtml(g.name)}</b> (+${g.value}), ahead to the west. Try about <b>${g.alt} km</b> to ${g.dir}.</span>`;
+}
+function updateGoal() {
+  const you = state.world.runs.you;
+  const done = state.goal && you.log.some((l) => l.target === state.goal.name);
+  if (state.T > 4 * 24 || done || !you.track.at(-1)[6]) { if (state.goal) { state.goal = null; globe() && globe().setGoal(null); } return; }
+  if (!state.goal && state.T < 4 * 24) { state.goal = pickGoal(); globe() && globe().setGoal(state.goal); }
+}
 function setAim(a) {
   state.aim = clamp(Math.round(a * 2) / 2, ...LIMITS);
   $("aim").value = state.aim;
@@ -231,8 +262,9 @@ function drawPilot() {
   const ns = Math.abs(v) < 0.5 ? "no north-south drift" : `drifting ${v > 0 ? "north" : "south"} ${Math.abs(v).toFixed(1)} m/s`;
   const risky = alt < CORRIDOR[0] || alt > CORRIDOR[1] ? " · ⚠ risky layer" : "";
   $("aimval").textContent = `${state.aim.toFixed(1)} km`;
-  $("pilotread").textContent = !alive ? "Your balloon is lost." :
-    `Now ${alt.toFixed(1)} km · west ${(-u).toFixed(0)} m/s · ${ns}${risky} · health ${Math.round(health * 100)}% · ballast ${ballast.toFixed(0)} km · gas ${gas.toFixed(0)} km`;
+  $("pilotread").innerHTML = !alive ? "<b>Your balloon is lost.</b>" :
+    `<b>${alt.toFixed(1)} km</b> · ${ns}${risky ? ' · <span class="warn">⚠ risky height</span>' : ""} · <b>health ${Math.round(health * 100)}%</b>
+     <span class="minor">· west ${(-u).toFixed(0)} m/s · ballast ${ballast.toFixed(0)} km · gas ${gas.toFixed(0)} km</span>${goalText()}`;
 }
 
 // ---------- map ----------
@@ -290,13 +322,14 @@ function drawMap() {
 
   // tracks
   for (const r of runsIn()) {
-    const tr = w.runs[r].track, i = runIdx(r, i0);
-    ctx.strokeStyle = COLOR[r]; ctx.lineWidth = r === "agent" || r === "you" ? 2.4 : 1.6;
-    ctx.globalAlpha = r === "agent" || r === "you" ? 1 : 0.8;
+    // Same focus as the globe: the watched balloon's whole path; the others only their last 3 days, faint.
+    const tr = w.runs[r].track, i = runIdx(r, i0), sel = r === state.sel, k0 = sel ? 0 : Math.max(0, i - 288);
+    ctx.strokeStyle = COLOR[r]; ctx.lineWidth = sel ? 2.6 : 1.2;
+    ctx.globalAlpha = sel ? 1 : 0.35;
     ctx.beginPath();
-    for (let k = 0; k <= i; k++) {
+    for (let k = k0; k <= i; k++) {
       const [x, y] = xy(tr[k][0], tr[k][1], W, H);
-      if (k === 0 || Math.abs(tr[k][1] - tr[k - 1][1]) > 180) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      if (k === k0 || Math.abs(tr[k][1] - tr[k - 1][1]) > 180) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.stroke(); ctx.globalAlpha = 1;
     if (r === "you") {                                   // glowing tail: last 6 simulated hours
@@ -725,13 +758,18 @@ function showFinish() {
   const w = state.world, end = totalH();
   const rows = Object.keys(RUN_NAME).filter((r) => w.runs[r]).map((r) => ({ r, pts: pointsBy(r, end) })).sort((a, b) => b.pts - a.pts);
   const win = rows[0], you = rows.findIndex((x) => x.r === "you") + 1;
-  const top = w.runs[win.r].log.filter((l) => (l.kind === "reached" || l.kind === "you") && l.t_h <= end && (l.pts ?? 1) > 1)
-    .sort((a, b) => (b.pts ?? 1) - (a.pts ?? 1)).slice(0, 3);
+  // Group repeated catches ("gas plume at Kunapipi Mons ×2, +18") so the summary explains, not repeats.
+  const groups = new Map();
+  for (const l of w.runs[win.r].log.filter((l) => (l.kind === "reached" || l.kind === "you") && l.t_h <= end && (l.pts ?? 1) > 1)) {
+    const name = captureName(l.target), g = groups.get(name) || { name, n: 0, pts: 0 };
+    g.n += 1; g.pts += l.pts ?? 1; groups.set(name, g);
+  }
+  const top = [...groups.values()].sort((a, b) => b.pts - a.pts).slice(0, 3);
   const lost = (r) => (w.runs[r].lost_h != null && w.runs[r].lost_h <= end) || (r === "you" && w.runs.you.track.at(-1)[6] === 0);
   $("finish").innerHTML = `
     <h3>Mission complete · World ${w.seed}</h3>
     <p class="fwin"><b style="color:${COLOR[win.r]}">${RUN_NAME[win.r]}</b> wins with <b>${win.pts}</b> points.</p>
-    ${top.length ? `<p class="fnote">Decisive catches: ${top.map((l) => `${escapeHtml(captureName(l.target))} (+${l.pts})`).join(", ")}.</p>` : ""}
+    ${top.length ? `<p class="fnote">Decisive catches: ${top.map((g) => `${escapeHtml(g.name)}${g.n > 1 ? ` ×${g.n}` : ""} (+${g.pts})`).join(", ")}.</p>` : ""}
     <ol>${rows.map((x) => `<li><span style="color:${COLOR[x.r]}">${RUN_NAME[x.r]}</span><b>${x.pts}</b>${lost(x.r) ? '<em>lost</em>' : ""}</li>`).join("")}</ol>
     <p class="fnote">You placed <b>${you}</b> of ${rows.length}.</p>
     <div class="fbtns"><button id="freplay">Replay</button><button id="fnext">Next world</button><button id="fclose">Close</button></div>`;
@@ -780,7 +818,7 @@ function frame(now) {
       if (state.T >= endH()) setPlaying(false);
     }
     state.maxT = Math.max(state.maxT, state.T, totalH());
-    syncYou(); drawPilot(); sounds(dt); director(); drawDecision(); drawFacts();
+    syncYou(); updateGoal(); drawPilot(); sounds(dt); director(); drawDecision(); drawFacts();
     if (state.T >= totalH() && !state.finishShown) { state.finishShown = true; showFinish(); }
     if (state.T < totalH() - 1) state.finishShown = false;
     if (state.frameN % 10 === 0) drawWindPanel();
@@ -814,7 +852,7 @@ async function load(seed) {
   state.big = new Set(Object.entries(state.world.target_size || {}).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k]) => k));
   state.world.runs.you = newYou();
   setAim(56);
-  state.heroDone = new Set(); state.hero = null; state.finishShown = false;
+  state.heroDone = new Set(); state.hero = null; state.finishShown = false; state.goal = null;
   if ($("finish")) $("finish").hidden = true;
   facts.shown = new Set(); facts.lastMs = -1e9; $("fact").classList.remove("show");
   if (!state.world.runs[state.sel]) state.sel = state.world.runs.hybrid ? "hybrid" : "agent";

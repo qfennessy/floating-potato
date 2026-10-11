@@ -7,7 +7,7 @@
   <meta name="description" content="An AI flies a balloon through the clouds of Venus by choosing its altitude, and chases eruptions its sensors pick up.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
-  <link rel="stylesheet" href="style.css?v=202610111817">
+  <link rel="stylesheet" href="style.css?v=202610111821">
   <script type="importmap">
     { "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -23,6 +23,7 @@
       <div class="brand">
         <h1><a href="./" class="home">Venus Balloon Navigator</a></h1>
         <p class="lede">Balloons can't steer, but they can pick their wind. Click a balloon's score to follow it. <a href="./">How it works</a></p>
+        <p id="fact" class="fact" aria-live="polite"></p>
       </div>
       <div class="score" id="score"></div>
     </div>
@@ -32,7 +33,6 @@
     <div id="finish" class="finish" hidden></div>
 
     <div class="hud bottom">
-      <p id="fact" class="fact" aria-live="polite"></p>
       <p id="decision" class="decision"></p>
       <div class="pilot">
         <b><span class="tag you">Controlling</span> You</b>
@@ -105,7 +105,7 @@
   </footer>
 
   <div id="howtip" class="howtip" role="tooltip" hidden></div>
-  <script src="app.js?v=202610111817"></script>
-  <script type="module" src="globe.js?v=202610111817"></script>
+  <script src="app.js?v=202610111821"></script>
+  <script type="module" src="globe.js?v=202610111821"></script>
 </body>
 </html>

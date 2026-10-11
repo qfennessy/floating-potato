@@ -225,3 +225,12 @@ main { margin-top: 16px; }
 .finish .fbtns { display: flex; gap: 8px; margin-top: 10px; }
 
 .glabel.wreck { color: #f87171; font-size: 11px; font-weight: 700; }
+
+/* readability at presentation distance */
+.hud .pilot .note { font-size: 15px; color: var(--text); line-height: 1.5; }
+.hud .pilot .note .minor { color: #cdbfae; font-size: 13.5px; }
+.hud .pilot .note .warn { color: #fca5a5; font-weight: 700; }
+.hud .pilot .note .goal { display: block; margin-top: 4px; color: #f9c6e4; font-size: 14px; }
+.fineprint { font-size: 12.5px; color: rgba(236,228,216,0.75); }
+.windpanel .wrow.risky .alt::after { font-size: 12px; }
+.hud.top .fact { margin-top: 8px; max-width: 46ch; font-size: 12.5px; }

@@ -55,12 +55,12 @@
         <button id="sound" aria-label="Turn volcano sounds on or off" class="on">Sound on</button>
       </div>
       <div class="legend">
-        <span><i class="sw you"></i>You</span>
-        <span><i class="sw agent"></i>Gemini Robotics-ER 2</span>
-        <span><i class="sw flash"></i>Gemini 3.8 Flash</span>
-        <span><i class="sw rules"></i>Rulebook</span>
-        <span><i class="sw vega"></i>Drifter at 54 km (Vega 1985)</span>
-        <span><i class="sw best"></i>Best single fixed altitude for all worlds</span>
+        <span data-run="you"><i class="sw you"></i>You</span>
+        <span data-run="agent"><i class="sw agent"></i>Gemini Robotics-ER 2</span>
+        <span data-run="flash"><i class="sw flash"></i>Gemini 3.8 Flash</span>
+        <span data-run="rules"><i class="sw rules"></i>Rulebook</span>
+        <span data-run="vega"><i class="sw vega"></i>Drifter at 54 km (Vega 1985)</span>
+        <span data-run="best"><i class="sw best"></i>Best single fixed altitude for all worlds</span>
         <span><i class="dot ev"></i>Event (eruption, plume, lightning)</span>
         <span><i class="dot heard"></i>Heard by agent</span>
       </div>
@@ -86,6 +86,7 @@
     <p>Built at <a href="https://www.sundai.club/events/boston/hack-144-autonomous-spacecraft-hack">Sundai Club Hack 144</a>, Oct 11 2026. Simulated winds, not real Venus data. Maps: NASA / JPL / USGS Magellan radar mosaic and topography. 3D: three.js. Code: <a href="https://github.com/qfennessy/floating-potato">github.com/qfennessy/floating-potato</a>.</p>
   </footer>
 
+  <div id="howtip" class="howtip" role="tooltip" hidden></div>
   <script src="app.js"></script>
   <script type="module" src="globe.js"></script>
 </body>

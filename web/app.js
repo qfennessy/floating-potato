@@ -316,14 +316,18 @@ function drawStrip() {
 function drawScore() {
   const cards = [["you", "You"], ["agent", "Gemini ER 2"], ["flash", "Gemini 3.8 Flash"], ["rules", "Rulebook"],
                  ["vega", "Vega-style drifter"], ["best", "Best single fixed altitude"]].filter(([r]) => state.world.runs[r]);
-  $("score").innerHTML = cards.map(([r, name]) => {
+  const html = cards.map(([r, name]) => {
     // Everyone is scored to the same finish line: the end of the AI flights (day 30). You can keep
     // flying after that, but those points are shown separately and don't count in the race.
     const pts = pointsBy(r, Math.min(state.T, totalH()));
     const extra = r === "you" && state.T > totalH() ? pointsBy("you", state.T) - pts : 0;
     const note = r === "you" && state.T > totalH() ? `<em>final at day ${state.world.days}${extra ? ` · +${extra} after, not counted` : ""}</em>` : "";
-    return `<div class="card ${r}"><b>${pts}</b><span>${name} points</span>${note}</div>`;
+    return `<div class="card ${r}" data-run="${r}" title=""><b>${pts}</b><span>${name} points</span>${note}</div>`;
   }).join("");
+  if (html === state.scoreHtml) return;                 // only touch the DOM when a score changes
+  state.scoreHtml = html;
+  $("score").innerHTML = html;
+  wireHow($("score"));
 }
 
 function drawLog() {
@@ -403,6 +407,72 @@ function sounds(dt) {
   }
 }
 
+// ---------- hover windows: how each balloon decides ----------
+const MODEL_HOW = (name, id) => `
+  <h4>${name}</h4>
+  <p class="mono">${id}, thinking level medium</p>
+  <p><b>When it decides:</b> every 2 days, and right away when mission control sends a message. Between
+  decisions a shared search planner flies the altitude.</p>
+  <p><b>What it sees:</b> a map image (volcanoes, visited and unvisited sites, lanes, its own track,
+  mission control circles), its position and time left, the last 12 sensor reports, and every mission
+  control message. It is <i>not</i> told how many unvisited sites each lane has; it has to read the map.</p>
+  <p><b>Prompt, shortened:</b></p>
+  <blockquote>You are the strategist for a research balloon in the clouds of Venus… Winds carry the balloon
+  west… low is slower and drifts toward the equator; high is faster and drifts toward the poles…
+  Holding a lane means cruising with no north-south drift, passing everything in it once a lap…
+  Sites score only once, so judge from the map how many unvisited sites each lane still has.
+  Roaming lets the planner chase the nearest unvisited sites… You can also name one place to head for.
+  Call choose_lane once, with a one-sentence reason.</blockquote>
+  <p><b>Tools:</b> <span class="mono">choose_lane(lane | roam, head_for, reason)</span>; when its sensors hear
+  an event, <span class="mono">chase_event(reason)</span> or <span class="mono">stay_course(reason)</span>.</p>`;
+const HOW = {
+  you: () => `<h4>You</h4>
+    <p>You set the target altitude (slider, buttons or ↑ ↓). The balloon climbs or sinks 0.5 km per
+    15 minutes toward it, and the same winds as everyone else carry it.</p>
+    <p><b>Your advantages:</b> you see every eruption on the globe, not just the ones your sensors hear;
+    you can change altitude any time; you can rewind. Your score is frozen at day ${state.world.days}, the
+    same finish line as the AI flights.</p>`,
+  agent: () => MODEL_HOW("Gemini Robotics-ER 2", "gemini-robotics-er-2-preview"),
+  flash: () => MODEL_HOW("Gemini 3.8 Flash", "gemini-3.8-flash"),
+  rules: () => `<h4>Rulebook</h4>
+    <p>Plain code, no model. Same planner, same check-ins.</p>
+    <ol><li>Score each lane: 1 point per unvisited site within reach plus 0.3 per volcano, scaled by the
+    share of the mission left after travelling there.</li>
+    <li>If the best lane has fewer than 3 unvisited sites, roam.</li>
+    <li>Otherwise hold the current lane unless another scores 1.3× better.</li>
+    <li>Chase a heard event if the planner can reach it in time and it is worth 2+ points or under
+    12 hours away.</li></ol>
+    <p><b>Ignores:</b> mission control messages, and which volcanoes have been erupting lately.</p>`,
+  vega: () => `<h4>Drifter at 54 km</h4>
+    <p>Climbs to 54 km and stays there for the whole flight, like the Soviet-French Vega balloons in 1985.
+    No decisions at all; it scores whatever the wind carries it past.</p>`,
+  best: () => `<h4>Best single fixed altitude</h4>
+    <p>A balloon parked at ${state.world.runs.best.fixed_alt} km for the whole flight. Of the 8 fixed
+    altitudes tried, this one scored best across all 20 worlds, so it is the strongest balloon that never
+    makes a decision. The fair rival: one altitude, picked before launch.</p>`,
+};
+function showHow(run, anchor) {
+  const tip = $("howtip");
+  if (!HOW[run] || !state.world.runs[run]) return;
+  tip.innerHTML = HOW[run]();
+  tip.style.borderColor = COLOR[run];
+  tip.hidden = false;
+  const r = anchor.getBoundingClientRect(), w = Math.min(380, innerWidth - 32);
+  tip.style.width = `${w}px`;
+  tip.style.left = `${Math.max(16, Math.min(r.left, innerWidth - w - 16)) + scrollX}px`;
+  tip.style.top = `${r.bottom + 8 + scrollY}px`;
+}
+const hideHow = () => { $("howtip").hidden = true; };
+function wireHow(root) {
+  root.querySelectorAll("[data-run]").forEach((el) => {
+    el.tabIndex = 0;
+    el.onmouseenter = el.onfocus = () => showHow(el.dataset.run, el);
+    el.onmouseleave = el.onblur = hideHow;
+    el.onclick = (e) => { e.stopPropagation(); $("howtip").hidden ? showHow(el.dataset.run, el) : hideHow(); };
+  });
+}
+document.addEventListener("click", hideHow);
+
 // ---------- globe hookup (globe.js is a module and may load after this script) ----------
 const globe = () => window.venusGlobe;
 function globeLoad() { if (globe() && state.world) globe().load(state.world); }
@@ -444,7 +514,7 @@ function setPlaying(p) {
 
 async function load(seed) {
   state.world = await (await fetch(`data/world${seed}.json`)).json();
-  state.T = 0; state.maxT = 0; state.logCount = -1; audio.lastT = 0; state.markerCount = -1;
+  state.T = 0; state.maxT = 0; state.logCount = -1; audio.lastT = 0; state.markerCount = -1; state.scoreHtml = "";
   state.gen = { t: state.world.days * 24, n: 0, rand: rng32(state.world.seed * 7919 + 17) };
   state.big = new Set(Object.entries(state.world.target_size || {}).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k]) => k));
   state.world.runs.you = newYou();
@@ -479,6 +549,7 @@ async function init() {
     $("follow").hidden = flat;
   };
   $("follow").onclick = () => globe() && globe().setFollow(!globe().follow);
+  wireHow(document.querySelector(".legend"));
   $("sound").onclick = () => {
     audio.on = !audio.on;
     if (audio.on) audioCtx();

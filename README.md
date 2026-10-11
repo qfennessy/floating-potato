@@ -61,6 +61,20 @@ The constraint that makes it interesting: the balloon lives in a narrow corridor
 
 Keep the physics simple: altitude changes at a fixed rate per step, and horizontal motion equals the wind at the current altitude. Nobody will judge buoyancy equations; they will judge whether the agent makes smart choices.
 
+### How the balloon moves north and south
+
+The balloon can't steer north or south directly. It can only change altitude, and the north-south wind blows in opposite directions above and below the middle of the corridor (about 56 km). So picking an altitude picks the direction of drift.
+
+- **Above about 56 km**, the wind pushes the balloon toward the nearer pole.
+- **Below about 56 km**, it pushes the balloon toward the equator.
+- **Near 56 km**, the north-south push mostly cancels out.
+
+This is a simplified version of Venus's real circulation (a "Hadley cell"). The push is strongest around 45° latitude and fades to nothing at the equator and the poles. It is slow: about 5° of latitude per Earth day at most, against the 60–100 m/s westward wind. A second, smaller wind flips direction with the time of day. That lets a balloon cross the equator if it times its altitude to the local time.
+
+The planner has no rule like "go high to head north." It tries hundreds of altitude schedules, flies each one through the same wind model, and keeps the ones that reach targets soonest. Heading north or south falls out of that search. Altitude also sets east-west speed, so the planner has to match the target's latitude and its longitude at the same moment. This also explains a result on the scoreboard: a balloon parked at 50.5 km gets pushed toward the equator the whole time, which happens to be where the volcanoes and most eruptions are.
+
+These winds are made up to match the plan, not taken from real Venus data. The 56 km turning point and the strength of the push are tuning choices in `sim/venus.py`.
+
 ## Sensors
 
 Two ways to add sensors. The science sensors are planned for today. Navigation without GPS is a stretch goal.

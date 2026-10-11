@@ -12,7 +12,7 @@ Why it matters: Venus's surface is 460 °C and 90 atmospheres, so landers die in
 
 Win condition for the demo: the agent reaches more targets in the same number of Earth days than a balloon that rides one altitude around the planet.
 
-## Current state (Oct 11, 14:50)
+## Current state (Oct 11, 14:55)
 
 Live demo: https://venus-balloon-navigator.vercel.app
 
@@ -38,13 +38,14 @@ Team: one human (Q) and Claude Code.
 
 | Balloon | Points |
 |---|---|
+| Rule-based strategist: hold a lane while it has 3+ unvisited sites, else roam | 363 |
 | Gemini 3.8 Flash | 303 |
 | Gemini Robotics-ER 2 | 300 |
 | Best single fixed altitude for all worlds (59.5 km) | 282 |
 | Average of the 8 fixed altitudes | 235 |
 | Fixed at 54 km, like Vega 1985 | 218 |
 
-Both AIs beat the best fixed altitude by about 7%, and the two models are within 1% of each other: each wins about half the worlds. Model calls: ER 2 answers in about 3 s, Flash in about 30 s. No decision fell back to the rule version. Not yet measured: how a rule-based strategist does over the same 30 days (at 10 days it scored 127 against 155 for the best fixed altitude).
+**The plain rulebook beat both models by about 20%** (363 against 303 and 300; each model beat it in only 6 of 20 worlds). Same worlds, weather, planner and every-2-days check-ins; only the decision maker differs. The models roam about 70% of the time, the rulebook about 48%: the models leave lanes too early. Both AIs still beat the best fixed altitude by about 7%, and the two models are within 1% of each other: each wins about half the worlds. Model calls: ER 2 answers in about 3 s, Flash in about 30 s. No decision fell back to the rule version.
 
 ## The simple version
 

@@ -1,35 +1,35 @@
-"""Fair scoreboard: the search planner vs. EVERY fixed-altitude drifter, from several launch points.
+"""Fair scoreboard over many worlds: the agent vs. EVERY fixed-altitude drifter.
 
-The win condition is "more targets than a balloon riding one altitude", so the planner
-has to beat the best drifter at each launch, not just the Vega 54 km one.
+Uses the rule strategist and rule commander (no API calls), so it is quick and repeatable.
+A fixed altitude has to be chosen before launch; "best in hindsight" is shown only for context.
+
+    uv run --with numpy --with matplotlib python sim/compare.py --worlds 20
 """
-import sys
-import time
+import argparse
 
 import numpy as np
 
-from planner import search_planner
-from venus import State, drifter, run
+import commander as cmd
+import strategist as sg
+from mission import fly
 
-LAUNCHES = [(15.0, 300.0), (5.0, 60.0), (-10.0, 150.0), (25.0, 200.0), (-5.0, 330.0)]
-DAYS = 10.0
+ALTS = np.arange(50.5, 62.0, 1.5)
 
 
 def main():
-    wins = ties = 0
-    for lat, lon in LAUNCHES:
-        drift = {a: len(run(drifter(a), DAYS, State(lat, lon, a))[1].reached)
-                 for a in np.arange(50.5, 62.0, 0.5)}
-        best_alt = max(drift, key=drift.get)
-        t0 = time.time()
-        _, f = run(search_planner(), DAYS, State(lat, lon, 56.0))
-        p, b = len(f.reached), drift[best_alt]
-        wins += p > b
-        ties += p == b
-        print(f"launch {lat:+5.1f},{lon:5.1f}  planner {p} {f.reached}  "
-              f"best drifter {b} @ {best_alt:.1f} km  vega54 {drift[54.0]}  ({time.time() - t0:.0f}s)")
-        sys.stdout.flush()
-    print(f"planner beats the best drifter at {wins}/{len(LAUNCHES)} launches, ties {ties}")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--worlds", type=int, default=20)
+    a = ap.parse_args()
+    seeds = range(1, a.worlds + 1)
+    agent = np.array([fly("cmp", seed=s, strategist=sg.rule_strategist,
+                          commander=cmd.rule_commander)["points"] for s in seeds])
+    fixed = np.array([[fly("cmp", seed=s, fixed_alt=float(alt))["points"] for alt in ALTS] for s in seeds])
+    print(f"agent: {agent.sum():.0f} points over {a.worlds} worlds")
+    for alt, col in zip(ALTS, fixed.T):
+        print(f"  fixed {alt:4.1f} km: {col.sum():4.0f}   agent ahead in {(agent > col).sum()}, "
+              f"tied {(agent == col).sum()}, behind {(agent < col).sum()}")
+    print(f"average fixed altitude: {fixed.sum(0).mean():.0f}")
+    print(f"best fixed altitude per world, picked in hindsight: {fixed.max(1).sum():.0f}")
 
 
 if __name__ == "__main__":

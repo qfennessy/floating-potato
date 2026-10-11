@@ -12,7 +12,7 @@ Why it matters: Venus's surface is 460 °C and 90 atmospheres, so landers die in
 
 Win condition for the demo: the agent reaches more targets in the same number of Earth days than a balloon that rides one altitude around the planet.
 
-## Current state (Oct 11, 12:30)
+## Current state (Oct 11, 13:25)
 
 Live demo: https://venus-balloon-navigator.vercel.app
 
@@ -22,16 +22,27 @@ Team: one human (Q) and Claude Code.
 |---|---|---|
 | Simulator | Working. Our own plain numpy sim, not Google's Balloon Learning Environment (it is built for Earth; see Prep) | `sim/venus.py` |
 | Winds | Made-up layered winds that match the plan. Real Venus Climate Database winds not pulled yet | `sim/venus.py` |
-| Planner | Working. Tries a few hundred altitude plans 5 days ahead, every 6 hours | `sim/planner.py` |
-| Science sensor events | Working. Eruptions, gas plumes and lightning appear; the commander chases or ignores each one | `sim/events.py`, `sim/mission.py` |
-| Commander | Gemini Robotics-ER 2 flew all five demo worlds: 41 decisions, 7 chases, no fallbacks. A rule version is the backup | `sim/commander.py` |
-| Replay files | Each run saves a JSON with the track, events and log | `runs/` (made by `sim/mission.py`) |
-| Demo website | Live on Vercel. Replays saved runs, so it can't crash on stage. Rebuild data with `uv run --with numpy --with pillow python sim/export_web.py --gemini`, then push to `main`: Vercel deploys `web/` on every push | `web/` |
-| Pitch sketch | Done | `docs/pitch_sketch.png` |
+| Strategist | Gemini Robotics-ER 2 looks at a map picture once a day and picks a lane: north (22°N), equator (5°N) or south (47°S). It picks north in every demo world and stays there | `sim/strategist.py` |
+| Lane holding | Between chases, the balloon holds the chosen latitude by going up (drifts poleward) or down (drifts toward the equator) | `sim/mission.py` |
+| Science sensor events | Eruptions, gas plumes and lightning appear; the balloon only hears nearby ones. It chases only events it can reach within 6 hours | `sim/events.py`, `sim/commander.py` |
+| Planner | Flies the chases: tries a few hundred altitude plans ahead and keeps the best | `sim/planner.py` |
+| Demo website | Live on Vercel. Replays saved runs, so it can't crash on stage. Rebuild data with `uv run --with numpy --with pillow --with matplotlib python sim/export_web.py --gemini`, then push to `main`: Vercel deploys `web/` on every push | `web/` |
+| Pitch sketch | Done (from an earlier version of the agent) | `docs/pitch_sketch.png` |
 
-**Scoreboard, 5 random worlds, 10 Earth days each (points):** agent 24, Vega-style drifter at 54 km 5, best fixed altitudes 30 (50.5 km) and 28 (58 km). The agent clearly beats Vega but not the best fixed altitude yet. Why: early on it chases Beta Regio north and misses the volcano cluster near the equator, where most eruptions happen. A drifter at 50.5 km slides toward the equator by luck.
+**What we learned:** because the wind only blows west, a balloon can't stay near a place. It can only choose a latitude and pass everything in that lane once a lap. So the winning move is picking the right lane and staying in it. Switching lanes costs days, and chasing far-off events cost points in every test.
 
-Run it: `uv run --with numpy python sim/mission.py --seed 1` (add `--gemini` for the Gemini commander).
+**Scoreboard, 20 random worlds, 10 Earth days each** (`uv run --with numpy --with matplotlib python sim/compare.py`):
+
+| Balloon | Points |
+|---|---|
+| Agent (holds the busiest lane) | 173 |
+| Average of the 8 fixed altitudes | 72 |
+| Fixed at 54 km, like Vega 1985 | 27 |
+| Luckiest single fixed altitude (58 km) | 176 |
+
+The agent scores well over twice the average fixed altitude. Only one of the eight fixed altitudes keeps up, and you would have to guess it before launch. 58 km happens to drift into the same northern lane on its own from our launch point.
+
+The five demo worlds on the website use Gemini as strategist: agent 28, Vega drifter 5, average fixed altitude 13.4.
 
 ## The simple version
 

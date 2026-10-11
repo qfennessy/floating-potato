@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image
 
 import commander as cmd
+import strategist as sg
 from mission import fly
 from venus import CAPTURE_KM, CORRIDOR_KM, STEP_S, TARGETS
 
@@ -45,10 +46,10 @@ def main():
     a = ap.parse_args()
     basemap()
     commander = cmd.gemini_commander() if a.gemini else cmd.rule_commander
+    strategist = sg.gemini_strategist() if a.gemini else sg.rule_strategist
     who = "Gemini Robotics-ER 2" if a.gemini else "rule-based"
-    summary = []
     for seed in a.seeds:
-        agent = fly(f"agent_s{seed}", a.days, seed=seed, commander=commander)
+        agent = fly(f"agent_s{seed}", a.days, seed=seed, commander=commander, strategist=strategist)
         vega = fly(f"vega_s{seed}", a.days, seed=seed, fixed_alt=54.0)
         drifters = [fly(f"d{alt:g}_s{seed}", a.days, seed=seed, fixed_alt=float(alt)) for alt in LEVELS]
         best = max(drifters, key=lambda r: r["points"])
@@ -63,12 +64,21 @@ def main():
                 "best": slim(best, f"Best fixed altitude ({best['fixed_alt']:g} km, chosen in hindsight)"),
             },
         }
+        avg = float(np.mean([d["points"] for d in drifters]))
+        world["avg_fixed"] = avg
         (WEB / "data" / f"world{seed}.json").write_text(json.dumps(world, separators=(",", ":")))
-        summary.append({"seed": seed, "agent": agent["points"], "vega": vega["points"],
-                        "best": best["points"], "best_alt": best["fixed_alt"]})
-        print(f"world {seed}: agent {agent['points']:.0f}  vega {vega['points']:.0f}  "
-              f"best {best['points']:.0f} @ {best['fixed_alt']:g} km")
-    (WEB / "data" / "index.json").write_text(json.dumps({"commander": who, "worlds": summary}))
+        fb = sum("rule fallback" in l["text"] for l in agent["log"])
+        print(f"world {seed}: agent {agent['points']:.0f}  vega {vega['points']:.0f}  avg fixed {avg:.1f}  "
+              f"best {best['points']:.0f} @ {best['fixed_alt']:g} km  (fallbacks {fb})", flush=True)
+    # Rebuild the index from every world file, so worlds can be exported in parallel runs.
+    rows = []
+    for f in sorted((WEB / "data").glob("world*.json"), key=lambda f: int(f.stem[5:])):
+        w = json.loads(f.read_text())
+        r = w["runs"]
+        rows.append({"seed": w["seed"], "agent": r["agent"]["points"], "vega": r["vega"]["points"],
+                     "best": r["best"]["points"], "best_alt": r["best"]["fixed_alt"],
+                     "avg": round(w.get("avg_fixed", 0), 1)})
+    (WEB / "data" / "index.json").write_text(json.dumps({"commander": who, "worlds": rows}))
 
 
 if __name__ == "__main__":

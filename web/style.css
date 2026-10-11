@@ -58,6 +58,7 @@ aside { background: var(--panel); border: 1px solid var(--line); border-radius: 
 .log li { border-top: 1px solid var(--line); padding: 8px 0; font-size: 13.5px; animation: in .4s ease; }
 .log li .t { font: 12px "JetBrains Mono", monospace; color: var(--muted); }
 .log li .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; margin-left: 6px; }
+.log li.strategy .k { color: var(--best); }
 .log li.detect .k { color: var(--heard); }
 .log li.decision .k { color: var(--agent); }
 .log li.reached .k { color: var(--good); }

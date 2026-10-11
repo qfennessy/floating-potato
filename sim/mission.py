@@ -20,15 +20,41 @@ from venus import STEP_S, TARGETS, State, drifter, gc_km, step
 ROOT = Path(__file__).resolve().parent.parent
 RUNS = ROOT / "runs"
 WATCH_W = 2.0       # planner reward per step spent near a volcano
+HOLD_BAND = 1.0     # degrees either side of the held latitude
+CHASE_MAX_H = 6.0   # while holding a band, only consider chases this close
+STRATEGY_H = 24.0   # how often the strategist re-picks where to hang out and which sites to pursue
 
 
-def fly(name, days=10.0, start=(15.0, 300.0), seed=1, commander=None, fixed_alt=None):
-    """commander=None with fixed_alt flies a drifter; sensors still record events it passes."""
+def hold_latitude(lat_target, band=HOLD_BAND):
+    """Keep latitude near lat_target (signed). High altitude drifts poleward and low drifts
+    toward the equator, so which one moves you north depends on the hemisphere you're in.
+    Mid-corridor (56 km) has no north-south drift."""
+    def policy(st):
+        if st.lat < lat_target - band:                     # need to go north
+            goal = 61.5 if st.lat >= 0 else 50.5
+        elif st.lat > lat_target + band:                   # need to go south
+            goal = 50.5 if st.lat > 0 else 61.5
+        else:
+            goal = 56.0
+        return int(np.sign(round(goal - st.alt, 3)))
+    return policy
+
+
+def fly(name, days=10.0, start=(15.0, 300.0), seed=1, commander=None, fixed_alt=None, strategist=None,
+        hold_lat=None):
+    """commander=None with fixed_alt flies a drifter; sensors still record events it passes.
+
+    strategist(st, view) -> {"focus": [volcano names], "fixed": [fixed site names], "reason": str}
+    runs every STRATEGY_H hours: focus sets where the planner loiters, fixed which sites it pursues.
+    It may also return "hold_lat": the latitude to hold between chases.
+
+    hold_lat: when set, the balloon holds that latitude band and the planner only flies chases."""
     events = generate(days, seed)
     st = State(start[0], start[1], fixed_alt or 56.0)
     planner = None if fixed_alt else search_planner()
     policy = drifter(fixed_alt) if fixed_alt else planner
     known, chasing, ignored = {}, None, set()
+    plan = {"focus": list(VOLCANOES), "fixed": list(TARGETS), "next_h": 0.0, "hold": hold_lat, "lane": None}
     log, track = [], [(st.lat, st.lon, st.alt, st.hours)]
 
     def say(kind, text, **extra):
@@ -39,13 +65,32 @@ def fly(name, days=10.0, start=(15.0, 300.0), seed=1, commander=None, fixed_alt=
             return {chasing.id: chasing.as_target()}
         live = {e.id: e.as_target() for e in known.values()
                 if e.id not in ignored and e.ends_h > st.hours}
-        return {**TARGETS, **live}
+        fixed = {k: TARGETS[k] for k in plan["fixed"] if k in TARGETS}
+        return {**fixed, **live}
+
+    def restrategize():
+        view = {"track": track, "known": [e for e in known.values()], "events_heard":
+                [l for l in log if l["kind"] == "detect"], "reached": list(st.reached),
+                "unvisited": [t for t in TARGETS if t not in st.reached], "days": days,
+                "lane": plan["lane"]}
+        out = strategist(st, view)
+        plan["focus"] = [v for v in out.get("focus", []) if v in VOLCANOES] or plan["focus"]
+        plan["fixed"] = [t for t in out.get("fixed", []) if t in TARGETS]
+        if out.get("hold_lat") is not None:
+            plan["hold"] = float(out["hold_lat"])
+        plan["lane"] = out.get("lane", plan["lane"])
+        say("strategy", out.get("reason", ""), focus=plan["focus"], fixed=plan["fixed"], hold_lat=plan["hold"])
+        planner.set_watch([VOLCANOES[v] for v in plan["focus"]], WATCH_W)
+        planner.set_targets(planner_targets())
 
     if planner:
         planner.set_watch(VOLCANOES.values(), WATCH_W)   # hang around where eruptions happen
         planner.set_targets(planner_targets())
 
     for _ in range(int(days * 24 * 3600 / STEP_S)):
+        if strategist and planner and not chasing and st.hours >= plan["next_h"]:
+            plan["next_h"] = st.hours + STRATEGY_H
+            restrategize()
         for ev in events:
             if ev.id not in known and detectable(ev, st.lat, st.lon, st.hours):
                 known[ev.id] = ev
@@ -55,7 +100,13 @@ def fly(name, days=10.0, start=(15.0, 300.0), seed=1, commander=None, fixed_alt=
                 if commander and not chasing:
                     left = ev.ends_h - st.hours
                     eta = eta_hours(st, ev.as_target(), left)
-                    choice, reason = commander(ev, st, eta, left, [t for t in TARGETS if t not in st.reached])
+                    if plan["hold"] is not None and (eta is None or eta > CHASE_MAX_H):
+                        # Long chases pull the balloon out of its band and cost more than they win.
+                        choice = "ignore"
+                        reason = (f"Staying in the {plan['hold']:.0f}° band: {ev.label()} is "
+                                  + ("out of reach before it fades." if eta is None else f"{eta:.0f} h away."))
+                    else:
+                        choice, reason = commander(ev, st, eta, left, [t for t in TARGETS if t not in st.reached])
                     say("decision", reason, event=ev.id, choice=choice,
                         eta_h=None if eta is None else round(eta, 1))
                     if choice == "chase":
@@ -73,7 +124,11 @@ def fly(name, days=10.0, start=(15.0, 300.0), seed=1, commander=None, fixed_alt=
         # Captures are judged at the TRUE source; the planner only knows the reported spot.
         active = {**TARGETS, **{e.id: (e.lat, e.lon) for e in events if e.t_h <= st.hours < e.ends_h}}
         before = set(st.reached)
-        st = step(st, policy(st), active)
+        if planner and plan["hold"] is not None and not chasing:
+            action = hold_latitude(plan["hold"])(st)          # cruise in the chosen band
+        else:
+            action = policy(st)
+        st = step(st, action, active)
         for got in set(st.reached) - before:
             what = got if got in TARGETS else next(e.label() for e in events if e.id == got)
             say("reached", f"reached {what}", target=got)

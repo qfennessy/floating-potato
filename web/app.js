@@ -156,7 +156,7 @@ function drawLog() {
   const entries = w.runs.agent.log.filter((l) => l.t_h <= T);
   if (entries.length === state.logCount) return;
   state.logCount = entries.length;
-  const label = { detect: "heard", decision: "decided", reached: "reached", missed: "missed" };
+  const label = { strategy: "strategy", detect: "heard", decision: "decided", reached: "reached", missed: "missed" };
   $("log").innerHTML = entries.slice().reverse().map((l) =>
     `<li class="${l.kind}"><span class="t">day ${hoursToDay(l.t_h)}</span><span class="k">${label[l.kind] || l.kind}</span><br>${escapeHtml(l.text)}${l.kind === "reached" ? ` <b>+${valueOf(l.target)}</b>` : ""}</li>`
   ).join("") || `<li class="t">Listening…</li>`;
@@ -167,11 +167,11 @@ function drawTable() {
   const rows = state.index.worlds;
   const tot = (k) => rows.reduce((s, r) => s + r[k], 0);
   $("table").innerHTML =
-    `<tr><th>World</th><th>Agent</th><th>Drifter 54 km</th><th>Best fixed altitude</th></tr>` +
+    `<tr><th>World</th><th>Agent</th><th>Drifter 54 km</th><th>Average fixed altitude</th><th>Best fixed altitude</th></tr>` +
     rows.map((r) => `<tr class="${r.seed === state.world.seed ? "current" : ""}" data-seed="${r.seed}" style="cursor:pointer">
-      <td>World ${r.seed}</td><td class="${r.agent > r.vega ? "win" : ""}">${r.agent}</td><td>${r.vega}</td>
+      <td>World ${r.seed}</td><td class="${r.agent > r.vega ? "win" : ""}">${r.agent}</td><td>${r.vega}</td><td>${r.avg}</td>
       <td>${r.best} <span class="note">(${r.best_alt} km)</span></td></tr>`).join("") +
-    `<tr><td><b>Total</b></td><td><b>${tot("agent")}</b></td><td><b>${tot("vega")}</b></td><td><b>${tot("best")}</b></td></tr>`;
+    `<tr><td><b>Total</b></td><td><b>${tot("agent")}</b></td><td><b>${tot("vega")}</b></td><td><b>${Math.round(tot("avg") * 10) / 10}</b></td><td><b>${tot("best")}</b></td></tr>`;
   $("table").querySelectorAll("tr[data-seed]").forEach((tr) => tr.onclick = () => load(+tr.dataset.seed));
 }
 

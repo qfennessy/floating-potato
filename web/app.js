@@ -175,6 +175,16 @@ function drawTable() {
   $("table").querySelectorAll("tr[data-seed]").forEach((tr) => tr.onclick = () => load(+tr.dataset.seed));
 }
 
+// ---------- globe hookup (globe.js is a module and may load after this script) ----------
+const globe = () => window.venusGlobe;
+function globeLoad() { if (globe() && state.world) globe().load(state.world); }
+document.addEventListener("globe-ready", globeLoad);
+document.addEventListener("globe-follow", (e) => {
+  $("follow").classList.toggle("on", e.detail);
+  $("follow").textContent = e.detail ? "Following" : "Follow agent";
+});
+function flatShown() { return !document.querySelector(".mapwrap").hidden; }
+
 // ---------- loop ----------
 function frame(now) {
   const dt = state.last ? (now - state.last) / 1000 : 0;
@@ -186,7 +196,13 @@ function frame(now) {
     }
     $("scrub").value = Math.round(state.T / totalH() * 1000);
     $("clock").textContent = `day ${hoursToDay(state.T)} of ${state.world.days}`;
-    drawMap(); drawStrip(); drawScore(); drawLog();
+    if (flatShown()) drawMap();
+    if (globe()) {
+      const T = state.T;
+      globe().update(T, idx(T), heardBy(T), new Set(reachedBy("agent", T)),
+        new Set([...reachedBy("vega", T), ...reachedBy("best", T)]));
+    }
+    drawStrip(); drawScore(); drawLog();
   }
   requestAnimationFrame(frame);
 }
@@ -201,7 +217,7 @@ async function load(seed) {
   state.T = 0; state.logCount = -1;
   $("world").value = seed;
   $("who").textContent = `Commander: ${state.world.commander}. Lines appear as the mission clock passes them.`;
-  drawTable(); setPlaying(true);
+  drawTable(); globeLoad(); setPlaying(true);
 }
 
 async function init() {
@@ -213,6 +229,14 @@ async function init() {
     if (state.T >= totalH()) state.T = 0;
     setPlaying(!state.playing);
   };
+  $("view").onclick = () => {
+    const flat = !flatShown();
+    document.querySelector(".mapwrap").hidden = !flat;
+    $("globe").hidden = flat;
+    $("view").textContent = flat ? "Globe" : "Flat map";
+    $("follow").hidden = flat;
+  };
+  $("follow").onclick = () => globe() && globe().setFollow(!globe().follow);
   $("scrub").oninput = (e) => { state.T = e.target.value / 1000 * totalH(); state.logCount = -1; };
   const q = +new URLSearchParams(location.search).get("world");
   await load(state.index.worlds.some((w) => w.seed === q) ? q : 3);

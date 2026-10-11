@@ -8,6 +8,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
   <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    { "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+  </script>
 </head>
 <body>
   <header>
@@ -20,7 +25,8 @@
 
   <main>
     <section class="stage">
-      <div class="mapwrap"><canvas id="map"></canvas></div>
+      <div id="globe" class="globe"></div>
+      <div class="mapwrap" hidden><canvas id="map"></canvas></div>
       <div class="controls">
         <button id="play" aria-label="Play or pause">Pause</button>
         <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Mission time">
@@ -35,6 +41,8 @@
         <label>World
           <select id="world"></select>
         </label>
+        <button id="view" aria-label="Switch between globe and flat map">Flat map</button>
+        <button id="follow" aria-label="Camera follows the agent balloon" class="on">Following</button>
       </div>
       <div class="legend">
         <span><i class="sw agent"></i>Agent</span>
@@ -62,9 +70,10 @@
   </section>
 
   <footer>
-    <p>Built at <a href="https://www.sundai.club/events/boston/hack-144-autonomous-spacecraft-hack">Sundai Club Hack 144</a>, Oct 11 2026. Simulated winds, not real Venus data. Map: NASA / JPL / USGS Magellan radar mosaic. Code: <a href="https://github.com/qfennessy/floating-potato">github.com/qfennessy/floating-potato</a>.</p>
+    <p>Built at <a href="https://www.sundai.club/events/boston/hack-144-autonomous-spacecraft-hack">Sundai Club Hack 144</a>, Oct 11 2026. Simulated winds, not real Venus data. Maps: NASA / JPL / USGS Magellan radar mosaic and topography. 3D: three.js. Code: <a href="https://github.com/qfennessy/floating-potato">github.com/qfennessy/floating-potato</a>.</p>
   </footer>
 
   <script src="app.js"></script>
+  <script type="module" src="globe.js"></script>
 </body>
 </html>

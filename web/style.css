@@ -34,6 +34,13 @@ header { display: flex; gap: 24px; justify-content: space-between; align-items: 
 main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; }
 @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
 
+.globe { position: relative; aspect-ratio: 16 / 10; background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.globe canvas { display: block; }
+.glabels { position: absolute; inset: 0; }
+.glabel { font: 600 11px Inter, sans-serif; color: #fff; text-shadow: 0 0 4px #000, 0 0 2px #000; white-space: nowrap; pointer-events: none; transition: opacity .2s; transform: translateY(-10px); }
+.glabel.event { color: var(--heard); }
+@media (max-width: 600px) { .globe { aspect-ratio: 1 / 1; } }
+button.on { border-color: var(--agent); color: var(--agent); }
 .mapwrap { background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 canvas { display: block; width: 100%; }
 #map { aspect-ratio: 2 / 1; }

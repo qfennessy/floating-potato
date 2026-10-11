@@ -12,7 +12,9 @@ Why it matters: Venus's surface is 460 °C and 90 atmospheres, so landers die in
 
 Win condition for the demo: the agent reaches more targets in the same number of Earth days than a balloon that rides one altitude around the planet.
 
-## Current state (Oct 11, 12:10)
+## Current state (Oct 11, 12:30)
+
+Live demo: https://venus-balloon-navigator.vercel.app
 
 Team: one human (Q) and Claude Code.
 
@@ -22,9 +24,9 @@ Team: one human (Q) and Claude Code.
 | Winds | Made-up layered winds that match the plan. Real Venus Climate Database winds not pulled yet | `sim/venus.py` |
 | Planner | Working. Tries a few hundred altitude plans 5 days ahead, every 6 hours | `sim/planner.py` |
 | Science sensor events | Working. Eruptions, gas plumes and lightning appear; the commander chases or ignores each one | `sim/events.py`, `sim/mission.py` |
-| Commander | Rule version working. Gemini Robotics-ER version written, answers tool calls, not yet run through a whole mission | `sim/commander.py` |
+| Commander | Gemini Robotics-ER 2 flew all five demo worlds: 41 decisions, 7 chases, no fallbacks. A rule version is the backup | `sim/commander.py` |
 | Replay files | Each run saves a JSON with the track, events and log | `runs/` (made by `sim/mission.py`) |
-| Demo website | Not started | |
+| Demo website | Live on Vercel. Replays saved runs, so it can't crash on stage. Rebuild data with `uv run --with numpy --with pillow python sim/export_web.py --gemini`, then `vercel deploy --prod` from `web/` | `web/` |
 | Pitch sketch | Done | `docs/pitch_sketch.png` |
 
 **Scoreboard, 5 random worlds, 10 Earth days each (points):** agent 24, Vega-style drifter at 54 km 5, best fixed altitudes 30 (50.5 km) and 28 (58 km). The agent clearly beats Vega but not the best fixed altitude yet. Why: early on it chases Beta Regio north and misses the volcano cluster near the equator, where most eruptions happen. A drifter at 50.5 km slides toward the equator by luck.

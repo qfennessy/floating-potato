@@ -7,7 +7,7 @@
   <meta name="description" content="An AI flies a balloon through the clouds of Venus by choosing its altitude, and chases eruptions its sensors pick up.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
-  <link rel="stylesheet" href="style.css?v=202610111748">
+  <link rel="stylesheet" href="style.css?v=202610111809">
   <script type="importmap">
     { "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -29,11 +29,13 @@
 
     <div id="windpanel" class="windpanel" aria-label="Wind at each altitude where the selected balloon is"></div>
 
+    <div id="finish" class="finish" hidden></div>
+
     <div class="hud bottom">
       <p id="fact" class="fact" aria-live="polite"></p>
       <p id="decision" class="decision"></p>
       <div class="pilot">
-        <b>Fly it yourself</b>
+        <b><span class="tag you">Controlling</span> You</b>
         <button id="down" aria-label="Lower your target altitude">▼</button>
         <input id="aim" type="range" min="44" max="68" step="0.5" value="56" aria-label="Your target altitude (below 50 and above 62 km are risky)">
         <button id="up" aria-label="Raise your target altitude">▲</button>
@@ -103,7 +105,7 @@
   </footer>
 
   <div id="howtip" class="howtip" role="tooltip" hidden></div>
-  <script src="app.js?v=202610111748"></script>
-  <script type="module" src="globe.js?v=202610111748"></script>
+  <script src="app.js?v=202610111809"></script>
+  <script type="module" src="globe.js?v=202610111809"></script>
 </body>
 </html>

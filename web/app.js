@@ -666,6 +666,8 @@ function selIndex() {
   const tr = state.world.runs[state.sel].track;
   return state.sel === "you" ? tr.length - 1 : Math.min(idx(state.T), tr.length - 1);
 }
+const RUN_NAME = { you: "You", hybrid: "Rules + Gemini", agent: "Gemini ER 2", flash: "Gemini 3.8 Flash", rules: "Rulebook",
+                   vega: "Vega 54 km", best: "Fixed altitude" };
 // Wind panel: what each altitude layer is doing right where the selected balloon is.
 const PANEL_LAYERS = [66, 64, 62, 59, 56, 53, 50, 47];
 function drawWindPanel() {
@@ -680,7 +682,7 @@ function drawWindPanel() {
       <span class="spd mono">${(-u).toFixed(0)} west</span>
       <span class="ns ${v > 0.3 ? "n" : v < -0.3 ? "s" : ""}">${ns} ${Math.abs(v).toFixed(1)} ${v > 0.3 ? "north" : v < -0.3 ? "south" : ""}</span></div>`);
   }
-  const html = `<div class="wtitle">Winds at ${lat.toFixed(0)}°${lat >= 0 ? "N" : "S"} <span class="note">(m/s)</span></div>${rows.join("")}
+  const html = `<div class="wtitle">Winds where <span style="color:${COLOR[r]}">${RUN_NAME[r]}</span> is, ${Math.abs(lat).toFixed(0)}°${lat >= 0 ? "N" : "S"} <span class="note">(m/s)</span></div>${rows.join("")}
     <div class="wnote">▲ pushes north, ▼ pushes south. Pick a layer to pick both your speed and your drift.</div>`;
   const el = $("windpanel");
   if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
@@ -689,7 +691,8 @@ function drawDecision() {
   const r = state.sel, w = state.world, el = $("decision");
   const [lat, , alt] = w.runs[r].track[selIndex()];
   let text;
-  if (r === "you") text = `<b style="color:${COLOR.you}">You:</b> aiming for ${state.aim.toFixed(1)} km.`;
+  if (state.T >= totalH()) text = `Mission complete. Scores are final at day ${w.days}.`;
+  else if (r === "you") text = `<b style="color:${COLOR.you}">You:</b> aiming for ${state.aim.toFixed(1)} km.`;
   else if (r === "vega" || r === "best") text = `<b style="color:${COLOR[r]}">${r === "vega" ? "Vega drifter" : "Fixed balloon"}:</b> parked at ${alt.toFixed(1)} km, going wherever the wind goes.`;
   else {
     const last = w.runs[r].log.filter((l) => l.kind === "strategy" && l.t_h <= state.T).pop();
@@ -697,7 +700,36 @@ function drawDecision() {
     const one = last ? plain(last.text.replace(/^(Autopilot|Gemini \([^)]*\)): /, "")).split(/(?<=[.!?])\s/)[0] : "Launching.";
     text = `<b style="color:${COLOR[r]}">${name}:</b> ${escapeHtml(one)}`;
   }
+  if (state.T < totalH()) text = `<span class="tag">Watching</span> ${text}`;
   if (el.dataset.html !== text) { el.innerHTML = text; el.dataset.html = text; }
+}
+
+// Mission-complete card at day 30: the winner, your place, and the captures that decided it.
+function captureName(id) {
+  if (id.startsWith("BONUS:")) return `priority site ${id.slice(6)} (bonus)`;
+  if (id.startsWith("SKY:")) return "a cloud-top sample";
+  if (id.startsWith("DEEP:")) return "a deep-air sample";
+  const e = state.world.events.find((x) => x.id === id);
+  return e ? `${KIND[e.kind]}${e.site ? " at " + e.site : ""}` : id;
+}
+function showFinish() {
+  const w = state.world, end = totalH();
+  const rows = Object.keys(RUN_NAME).filter((r) => w.runs[r]).map((r) => ({ r, pts: pointsBy(r, end) })).sort((a, b) => b.pts - a.pts);
+  const win = rows[0], you = rows.findIndex((x) => x.r === "you") + 1;
+  const top = w.runs[win.r].log.filter((l) => (l.kind === "reached" || l.kind === "you") && l.t_h <= end && (l.pts ?? 1) > 1)
+    .sort((a, b) => (b.pts ?? 1) - (a.pts ?? 1)).slice(0, 3);
+  const lost = (r) => (w.runs[r].lost_h != null && w.runs[r].lost_h <= end) || (r === "you" && w.runs.you.track.at(-1)[6] === 0);
+  $("finish").innerHTML = `
+    <h3>Mission complete · World ${w.seed}</h3>
+    <p class="fwin"><b style="color:${COLOR[win.r]}">${RUN_NAME[win.r]}</b> wins with <b>${win.pts}</b> points.</p>
+    ${top.length ? `<p class="fnote">Decisive catches: ${top.map((l) => `${escapeHtml(captureName(l.target))} (+${l.pts})`).join(", ")}.</p>` : ""}
+    <ol>${rows.map((x) => `<li><span style="color:${COLOR[x.r]}">${RUN_NAME[x.r]}</span><b>${x.pts}</b>${lost(x.r) ? '<em>lost</em>' : ""}</li>`).join("")}</ol>
+    <p class="fnote">You placed <b>${you}</b> of ${rows.length}.</p>
+    <div class="fbtns"><button id="freplay">Replay</button><button id="fnext">Next world</button><button id="fclose">Close</button></div>`;
+  $("finish").hidden = false;
+  $("freplay").onclick = () => { $("finish").hidden = true; state.T = 0; setPlaying(true); };
+  $("fnext").onclick = () => { $("finish").hidden = true; const ws = state.index.worlds.map((x) => x.seed); load(ws[(ws.indexOf(w.seed) + 1) % ws.length]); };
+  $("fclose").onclick = () => { $("finish").hidden = true; };
 }
 function forecastSel() {
   // Where the selected balloon goes in the next day if it keeps its current altitude (yours: your aim).
@@ -739,6 +771,8 @@ function frame(now) {
     }
     state.maxT = Math.max(state.maxT, state.T, totalH());
     syncYou(); drawPilot(); sounds(dt); director(); drawDecision(); drawFacts();
+    if (state.T >= totalH() && !state.finishShown) { state.finishShown = true; showFinish(); }
+    if (state.T < totalH() - 1) state.finishShown = false;
     if (state.frameN % 10 === 0) drawWindPanel();
     state.frameN += 1;
     if (globe() && state.frameN % 6 === 0) globe().setForecast(forecastSel());
@@ -770,7 +804,8 @@ async function load(seed) {
   state.big = new Set(Object.entries(state.world.target_size || {}).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k]) => k));
   state.world.runs.you = newYou();
   setAim(56);
-  state.heroDone = new Set(); state.hero = null;
+  state.heroDone = new Set(); state.hero = null; state.finishShown = false;
+  if ($("finish")) $("finish").hidden = true;
   facts.shown = new Set(); facts.lastMs = -1e9; $("fact").classList.remove("show");
   if (!state.world.runs[state.sel]) state.sel = state.world.runs.hybrid ? "hybrid" : "agent";
   $("world").value = seed;

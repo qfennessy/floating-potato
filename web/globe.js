@@ -13,6 +13,9 @@ const COLOR = { agent: 0xffb347, flash: 0x34d399, rules: 0xa78bfa, hybrid: 0xfac
 const ALL_RUNS = ["best", "vega", "rules", "flash", "agent", "hybrid", "you"];
 const KIND = { rumble: "eruption", so2: "gas plume", lightning: "lightning", major: "major eruption" };
 const VOLCANIC = new Set(["rumble", "so2", "major"]);
+const NAMES = { agent: "Gemini ER 2", flash: "Gemini 3.8 Flash", rules: "Rulebook", hybrid: "Rules + Gemini",
+                vega: "Vega 54 km", best: "Fixed altitude", you: "You" };
+const TRAIL_STEPS = 288;   // other balloons show only their last 3 days of path; the selected one, all of it
 
 // Altitude, exaggerated about 30x so the layers separate: 44 km -> 1.03, 68 km -> 1.15 (radius 1 = surface).
 export const EXAGGERATION = 30;
@@ -259,9 +262,10 @@ class Globe {
     this.sel = run;
     for (const r of this.runs || []) {
       const s = r === run;
-      this.lines[r].material.linewidth = s ? 4 : r === "you" ? 3 : 2;
-      this.lines[r].material.opacity = s ? 1 : 0.55;
-      this.balloons[r].scale.setScalar(s ? 1.5 : 1);
+      this.lines[r].material.linewidth = s ? 3.5 : 1.5;
+      this.lines[r].material.opacity = s ? 1 : 0.35;
+      this.balloons[r].scale.setScalar(s ? 1.35 : 1);
+      if (this.trail) this.trail[r] = null;            // rebuild trails for the new selection
       this.tethers[r].material.opacity = s ? 0.8 : 0.25;
     }
   }
@@ -293,7 +297,7 @@ class Globe {
       this.dynamic.add(line);
       this.lines[r] = line;
       const ball = new THREE.Mesh(new THREE.SphereGeometry(0.016, 16, 16), new THREE.MeshBasicMaterial({ color: COLOR[r] }));
-      ball.add(glowSprite(COLOR[r], 0.08));
+      ball.add(glowSprite(COLOR[r], 0.045, 0.55));       // a soft glow that doesn't hide the balloon
       this.dynamic.add(ball);
       this.balloons[r] = ball;
       const tg = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
@@ -330,6 +334,9 @@ class Globe {
     this.events = [];
     this.syncEvents();
     this.markers = [];
+    this.trail = {};
+    this.nameTag = label("", "nametag");
+    this.dynamic.add(this.nameTag);
     this.select(this.sel in world.runs ? this.sel : "agent");
   }
 
@@ -380,10 +387,9 @@ class Globe {
     this.T = T;
     this.syncEvents();
     for (const mk of this.markers || []) mk.ring.visible = mk.label.visible = T >= mk.m.t_h && T < mk.until;
-    this.refreshYou();
     for (const r of this.runs) {
       const track = this.world.runs[r].track, j = r === "you" ? track.length - 1 : Math.min(i, track.length - 1);
-      this.lines[r].geometry.instanceCount = Math.max(j, 1);
+      this.updateTrail(r, track, j);
       const [lat, lon, alt] = this.interp(track, r === "you" ? j : T / this.world.step_h);
       this.balloons[r].position.copy(toXYZ(lat, lon, altR(alt)));
       const tp = this.tethers[r].geometry.attributes.position;
@@ -416,6 +422,9 @@ class Globe {
     }
     this.updateScience(T);
     for (const s of this.samples || []) s.sp.visible = s.stalk.visible = !agentGot.has(s.id) && !this.finished;
+    const sp = this.balloons[this.sel];             // name tag on the balloon you're watching
+    if (sp) { this.nameTag.position.copy(sp.position).multiplyScalar(1.04); this.nameTag.element.textContent = NAMES[this.sel];
+              this.nameTag.element.style.color = "#" + COLOR[this.sel].toString(16).padStart(6, "0"); }
     for (const r of this.runs) {                     // a lost balloon turns grey
       const lost = this.world.runs[r].lost_h, dead = (lost != null && T >= lost) || (r === "you" && this.world.runs.you.track.at(-1)[6] === 0);
       this.balloons[r].material.color.set(dead ? 0x555555 : COLOR[r]);
@@ -431,20 +440,27 @@ class Globe {
     return [a[0] + (b[0] - a[0]) * f, mod(a[1] + dl * f, 360), a[2] + (b[2] - a[2]) * f];
   }
 
-  refreshYou() {
-    const yt = this.world.runs.you?.track;
-    if (!yt || yt.length === this.youLen) return;
-    this.youLen = yt.length;
-    const pos = [];
-    for (let k = 0; k < Math.max(yt.length, 2); k++) {
-      const [la, lo, al] = yt[Math.min(k, yt.length - 1)];
-      const p = toXYZ(la, lo, altR(al));
-      pos.push(p.x, p.y, p.z);
+  // Trails: the selected balloon shows its whole path; the others only their last 3 days, faint, so
+  // a finished mission isn't a cage of lines. Geometry is rebuilt only when the window moves on.
+  updateTrail(r, track, j) {
+    const sel = r === this.sel;
+    const start = sel ? 0 : Math.max(0, Math.floor((j - TRAIL_STEPS) / 16) * 16);
+    let c = this.trail[r];
+    if (!c || c.start !== start || j > c.end || (r === "you" && c.len !== track.length)) {
+      const end = r === "you" ? track.length - 1 : Math.min(track.length - 1, j + 96);
+      const pos = [];
+      for (let k = start; k <= Math.max(end, start + 1); k++) {
+        const [la, lo, al] = track[Math.min(k, track.length - 1)];
+        const p = toXYZ(la, lo, altR(al));
+        pos.push(p.x, p.y, p.z);
+      }
+      // Fresh geometry each time: three.js remembers a wide line's segment count when first drawn.
+      this.lines[r].geometry.dispose();
+      this.lines[r].geometry = new LineGeometry();
+      this.lines[r].geometry.setPositions(pos);
+      c = this.trail[r] = { start, end, len: track.length };
     }
-    // Fresh geometry each time: three.js remembers a wide line's segment count when first drawn.
-    this.lines.you.geometry.dispose();
-    this.lines.you.geometry = new LineGeometry();
-    this.lines.you.geometry.setPositions(pos);
+    this.lines[r].geometry.instanceCount = Math.max(j - start, 1);
   }
 
   // Science constellation: a glowing point on the surface for each capture, in the balloon's colour.
